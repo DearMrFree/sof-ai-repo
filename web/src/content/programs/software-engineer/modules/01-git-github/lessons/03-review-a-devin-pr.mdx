@@ -1,0 +1,62 @@
+---
+title: "Capstone: review a Devin PR"
+summary: "Give Devin a small feature, then review the PR they open."
+estimatedMinutes: 25
+devinCapstone:
+  title: "Add a /health endpoint to a toy Express server"
+  prompt: |
+    In the scratch repo, add a GET /health endpoint to the Express server in
+    src/index.js. It should return JSON: { status: "ok", uptime: <seconds> }.
+    Include a test that hits the endpoint and asserts the shape of the response.
+    Open a PR against main with a short description of what you changed and why.
+  repoHint: "DearMrFree/sof-ai-scratch"
+  rubric:
+    - "Endpoint exists at GET /health and returns the correct JSON shape."
+    - "A test for the new endpoint was added and passes in CI."
+    - "PR description explains the 'why', not just the 'what'."
+    - "No unrelated files were modified."
+    - "Commit messages are clear and present-tense."
+---
+
+## From reading code to reviewing code
+
+The best way to learn a codebase is to review someone else's change to it.
+Today that "someone else" is **Devin** — an autonomous software engineer. You
+write a spec, Devin writes the code, and you review it like you would any
+colleague's PR.
+
+## What to look for in a PR
+
+A great code review answers three questions:
+
+1. **Does it do what the spec said?** (Correctness.)
+2. **Is it built the way the rest of the codebase is built?** (Consistency.)
+3. **Will the next person to touch this understand it?** (Readability.)
+
+You are *not* reviewing for:
+
+- Whether you would have solved it the same way. That's your ego talking.
+- Style preferences the linter already enforces. Let the machine do machine work.
+- Things the PR didn't claim to do. Scope discipline matters.
+
+## The review rhythm
+
+1. **Read the description first.** What's the goal?
+2. **Read the tests next.** Tests tell you what the author *believes* the
+   code does. If the tests are missing or weak, the rest of the review is
+   harder.
+3. **Read the code last.** Look for surprise — anything that doesn't match
+   your mental model is worth a comment.
+4. **Leave comments at three levels:**
+   - 🚧 *Blockers* — must be fixed before merge.
+   - 💭 *Discussion* — "have we thought about X?"
+   - ✨ *Nits* — minor, optional.
+
+## Your capstone
+
+Use the Devin capstone below. Describe the feature, launch a session, and
+when Devin's PR lands, review it against the rubric.
+
+> In a later module we'll give you broken PRs to review — sometimes the spec
+> is wrong, sometimes the code is wrong, and sometimes *both* are wrong. Your
+> job as an engineer is to notice.

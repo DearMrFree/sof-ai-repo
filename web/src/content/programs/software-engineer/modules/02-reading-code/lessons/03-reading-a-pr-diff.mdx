@@ -1,0 +1,53 @@
+---
+title: "Reading a PR diff effectively"
+summary: "Diffs are a dense, specialized form of code — and they're most of what you'll read."
+estimatedMinutes: 15
+---
+
+## Diffs are their own language
+
+A diff isn't just code. It's code **plus** intent: the author is saying "this
+is the smallest meaningful change I could make to accomplish X."
+
+When you read a diff, you're asking:
+
+1. Is the change actually the smallest meaningful one? (Scope.)
+2. Does the change match the stated intent? (Correctness.)
+3. Does the change compose well with the rest of the codebase? (Fit.)
+
+## Reading order matters
+
+Do not read diffs top-to-bottom. The order of files in a diff is usually
+alphabetical, which is almost never the order the code actually executes in.
+Instead:
+
+1. Read the **description** first. What does the author *claim*?
+2. Read the **tests** next. What did the author *verify*?
+3. Read the **new files** before the **modified files**. New files stand
+   alone; modifications need context.
+4. For modified files, read the **module-level** changes before the
+   **method-level** changes. Did the shape of the API change?
+5. Only *then* read the line-level changes.
+
+## Skill drill
+
+Find any recent merged PR on a project you like. Review it using the order
+above, writing your observations at each stage. Then compare with the actual
+review comments on the PR.
+
+Two things to notice:
+
+- **What did the reviewer catch that you missed?** That's a gap to close.
+- **What did you notice that the reviewer didn't?** Maybe you caught
+  something real, or maybe you're applying the wrong standard. Ask the AI
+  tutor: "Is X a legitimate concern in this context, or am I nitpicking?"
+
+## The bigger point
+
+The senior version of "writing code" is closer to "editing code." You propose,
+the codebase pushes back, you refine. Reading diffs well is the feedback loop
+that drives that process.
+
+> Next module: specifications. If reading code is the consumer side of
+> engineering, specs are the producer side — and when Devin writes the code
+> for you, specs are *all you write*.

@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 24 24 27;
+  --foreground: 244 244 245;
+}
+
+html,
+body {
+  background: rgb(9 9 11);
+  color: rgb(244 244 245);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Smooth focus rings */
+:focus-visible {
+  outline: 2px solid rgb(99 102 241);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Prose overrides for MDX content */
+.prose-sof {
+  color: rgb(228 228 231);
+  max-width: 72ch;
+}
+.prose-sof h1,
+.prose-sof h2,
+.prose-sof h3 {
+  color: rgb(244 244 245);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.prose-sof h1 {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+.prose-sof h2 {
+  font-size: 1.5rem;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+}
+.prose-sof h3 {
+  font-size: 1.15rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.prose-sof p {
+  margin: 0.75rem 0;
+  line-height: 1.7;
+}
+.prose-sof a {
+  color: rgb(129 140 248);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose-sof ul {
+  list-style: disc;
+  margin: 0.75rem 0 0.75rem 1.5rem;
+}
+.prose-sof ol {
+  list-style: decimal;
+  margin: 0.75rem 0 0.75rem 1.5rem;
+}
+.prose-sof li {
+  margin: 0.25rem 0;
+}
+.prose-sof code {
+  background: rgb(39 39 42);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.prose-sof pre {
+  background: rgb(9 9 11);
+  border: 1px solid rgb(39 39 42);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+.prose-sof pre code {
+  background: transparent;
+  padding: 0;
+}
+.prose-sof blockquote {
+  border-left: 3px solid rgb(99 102 241);
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: rgb(212 212 216);
+  font-style: italic;
+}
+.prose-sof hr {
+  border-color: rgb(39 39 42);
+  margin: 2rem 0;
+}

@@ -1,0 +1,64 @@
+---
+title: "What is version control?"
+summary: "Why every serious software project tracks every change, and why Git won."
+estimatedMinutes: 12
+---
+
+## The problem version control solves
+
+Imagine you're writing an essay. You make a change, then another, then another.
+Halfway through the fifth revision you realize the *third* version was actually
+the best. Can you get it back?
+
+For a single essay you might just copy `essay_v1.txt`, `essay_v2.txt`,
+`essay_final.txt`, `essay_final_FINAL.txt` until you cry. For a million-line
+codebase with dozens of people editing at once, that approach explodes.
+
+**Version control** is the discipline — and the tooling — of tracking every
+change to a project so that:
+
+- Every historical state is recoverable.
+- Multiple people can work in parallel without clobbering each other.
+- You can experiment on a "branch" without breaking the main version.
+- You have a story — *why* each change was made, not just *what* changed.
+
+## Why Git won
+
+There are many version control systems (Subversion, Mercurial, Perforce), but
+**Git** has become the de facto standard for software. A few reasons:
+
+1. **Distributed.** Every clone of a Git repo is a full copy of the entire
+   history. You don't need a network connection to commit or view history.
+2. **Fast.** Git is brutally efficient at computing diffs and merging branches.
+3. **Branching is cheap.** Making a new branch costs almost nothing, which
+   unlocks a style of working where you make a branch for *every change*.
+4. **GitHub.** A company called GitHub built a social layer on top of Git —
+   pull requests, code review, issues, Actions — and it became the town square
+   of open source.
+
+## The three-line mental model
+
+Almost everything you'll do in Git boils down to three verbs:
+
+```bash
+git add <files>          # stage changes you want to save
+git commit -m "message"  # save them as a snapshot
+git push                 # send your snapshots to the shared repo
+```
+
+That's the whole core loop. Everything else — branches, merges, rebases,
+stashes — is a variation on that theme.
+
+## A taste of what's next
+
+In the next lessons you'll:
+
+- Make your first commit.
+- Open your first pull request.
+- Review a PR that Devin opened for you.
+- By the end of this module, you'll merge a PR into a real repo and have the
+  commit in your history forever.
+
+> **AI Tutor tip:** if any of this feels fuzzy, open the tutor panel on the
+> right and ask "walk me through what happens when I run `git commit`" or
+> "what's the difference between `git pull` and `git fetch`?".
