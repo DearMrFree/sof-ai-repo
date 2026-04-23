@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       try {
         const streamResp = await client.messages.stream({
-          model: "claude-3-5-sonnet-latest",
+          model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
           max_tokens: 1024,
           system,
           messages: anthropicMessages,
