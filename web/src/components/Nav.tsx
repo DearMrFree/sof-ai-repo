@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2 } from "lucide-react";
+import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2, School } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const navLinks = [
@@ -11,6 +11,7 @@ const navLinks = [
   { href: "/classroom", label: "Classroom", icon: Users },
   { href: "/classroom/feed", label: "Feed", icon: Newspaper },
   { href: "/classroom/assignments", label: "Assignments", icon: ClipboardList },
+  { href: "/devin", label: "Devin School", icon: School },
   { href: "/u", label: "People", icon: UserCircle2 },
 ];
 
