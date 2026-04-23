@@ -323,6 +323,120 @@ def test_mirror_issue_recovers_from_publish_failure(monkeypatch) -> None:
         assert len(publish_calls) == 2
 
 
+def test_mirror_article_without_id_records_error_and_does_not_mark_synced(
+    monkeypatch,
+) -> None:
+    """If OJS ``create_submission`` returns no int ``id``, we must NOT
+    commit the row as synced — otherwise the next ``resync_pending``
+    would re-submit via the ``ojs_submission_id IS NULL`` filter and
+    silently create a duplicate OJS submission.
+    """
+
+    class IdlessClient(FakeOJSClient):
+        def create_submission(
+            self, context_path: str, payload: dict[str, Any]
+        ) -> dict[str, Any]:
+            self.calls.append(("create_submission", context_path, payload))
+            return {}  # OJS returned 200 but no id — treat as a failure.
+
+    fake = IdlessClient()
+    _enable_ojs(monkeypatch, fake)
+
+    with Session(engine) as s:
+        j = _insert_journal(s, slug="article-no-id-test")
+        a = JournalArticle(
+            journal_slug=j.slug,
+            title="No-id submission",
+            abstract="",
+            body="Body",
+            submitter_type="user",
+            submitter_id="u-a",
+        )
+        s.add(a)
+        s.commit()
+        s.refresh(a)
+
+        assert adapter.mirror_article(s, a.id or 0) is False
+        s.refresh(a)
+        assert a.ojs_submission_id is None
+        assert a.ojs_synced_at is None
+        assert a.ojs_sync_error is not None
+        assert "did not return an id" in (a.ojs_sync_error or "")
+
+        # Key invariant: on resync the row must NOT be re-submitted to OJS
+        # (that would be the duplication bug).
+        calls_before = len(
+            [c for c in fake.calls if c[0] == "create_submission"]
+        )
+        adapter.resync_pending(s)
+        calls_after = len(
+            [c for c in fake.calls if c[0] == "create_submission"]
+        )
+        # Resync will try again (that's the point) — but the retry still
+        # fails with no-id, never succeeds, never marks as synced.
+        assert calls_after == calls_before + 1
+        s.refresh(a)
+        assert a.ojs_synced_at is None
+
+
+def test_mirror_review_without_id_records_error_and_does_not_mark_synced(
+    monkeypatch,
+) -> None:
+    """Same invariant as the article test — without an OJS id we must
+    never mark the peer-review row synced, or resync would duplicate it.
+    """
+
+    class IdlessClient(FakeOJSClient):
+        def create_review_assignment(
+            self, context_path: str, payload: dict[str, Any]
+        ) -> dict[str, Any]:
+            self.calls.append(
+                ("create_review_assignment", context_path, payload)
+            )
+            return {}
+
+    fake = IdlessClient()
+    _enable_ojs(monkeypatch, fake)
+
+    with Session(engine) as s:
+        j = _insert_journal(s, slug="review-no-id-test")
+        a = JournalArticle(
+            journal_slug=j.slug,
+            title="Article for no-id review",
+            abstract="",
+            body="Body",
+            submitter_type="user",
+            submitter_id="u-a",
+        )
+        s.add(a)
+        s.commit()
+        s.refresh(a)
+
+        # Mirror the article so the review has a valid ojs_submission_id
+        # to attach to — the bug we're testing lives in mirror_review.
+        assert adapter.mirror_article(s, a.id or 0) is True
+        s.refresh(a)
+        assert a.ojs_submission_id is not None
+
+        r = JournalPeerReview(
+            article_id=a.id or 0,
+            reviewer_type="user",
+            reviewer_id="u-reviewer",
+            recommendation="accept",
+            comments="LGTM",
+        )
+        s.add(r)
+        s.commit()
+        s.refresh(r)
+
+        assert adapter.mirror_review(s, r.id or 0) is False
+        s.refresh(r)
+        assert r.ojs_review_assignment_id is None
+        assert r.ojs_synced_at is None
+        assert r.ojs_sync_error is not None
+        assert "did not return an id" in (r.ojs_sync_error or "")
+
+
 def test_ojs_status_endpoint_reports_flag(monkeypatch) -> None:
     monkeypatch.delenv("OJS_BASE_URL", raising=False)
     monkeypatch.delenv("OJS_API_TOKEN", raising=False)

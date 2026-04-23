@@ -98,7 +98,10 @@ def mirror_journal(session: Session, journal_id: int) -> bool:
     return True
 
 
-def mirror_article(session: Session, article_id: int) -> bool:
+def mirror_article(session: Session, article_id: int) -> bool:  # noqa: PLR0911
+    # The guard returns are load-bearing: flag-off, missing row, already-
+    # synced, missing parent journal, failed parent mirror, OJS call
+    # failed, and OJS returned no id are all distinct "bail early" paths.
     if not ojs_enabled():
         return False
     a = session.get(JournalArticle, article_id)
@@ -137,7 +140,17 @@ def mirror_article(session: Session, article_id: int) -> bool:
         return False
 
     raw_id = resp.get("id")
-    a.ojs_submission_id = int(raw_id) if isinstance(raw_id, int) else None
+    if not isinstance(raw_id, int):
+        # Never mark synced without an id. If we did, `ojs_submission_id`
+        # would be NULL but `ojs_synced_at` would be set, and the next
+        # resync_pending call would re-submit via the `is_(None)` filter
+        # (plus the idempotency guard in mirror_article would not skip
+        # it either) — silently creating a duplicate OJS submission.
+        _record_error(
+            a, session, OJSError("OJS create_submission did not return an id")
+        )
+        return False
+    a.ojs_submission_id = raw_id
     a.ojs_synced_at = _utcnow()
     a.ojs_sync_error = None
     session.add(a)
@@ -145,7 +158,9 @@ def mirror_article(session: Session, article_id: int) -> bool:
     return True
 
 
-def mirror_review(session: Session, review_id: int) -> bool:
+def mirror_review(session: Session, review_id: int) -> bool:  # noqa: PLR0911
+    # Same rationale as mirror_article: each guard return represents a
+    # distinct "don't mirror this row right now" precondition.
     if not ojs_enabled():
         return False
     r = session.get(JournalPeerReview, review_id)
@@ -179,7 +194,16 @@ def mirror_review(session: Session, review_id: int) -> bool:
         return False
 
     raw_id = resp.get("id")
-    r.ojs_review_assignment_id = int(raw_id) if isinstance(raw_id, int) else None
+    if not isinstance(raw_id, int):
+        # Same reasoning as mirror_article: without an id we'd silently
+        # create a duplicate OJS review assignment on the next resync.
+        _record_error(
+            r,
+            session,
+            OJSError("OJS create_review_assignment did not return an id"),
+        )
+        return False
+    r.ojs_review_assignment_id = raw_id
     r.ojs_synced_at = _utcnow()
     r.ojs_sync_error = None
     session.add(r)
