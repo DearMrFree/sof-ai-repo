@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getAgent } from "@/lib/agents";
+import { sanitizeForAnthropic } from "@/lib/anthropicMessages";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,18 +49,13 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  const cleaned = body.messages
-    .filter((m) => m.content.trim().length > 0)
-    .map((m) => ({ role: m.role, content: m.content }));
-  // Anthropic requires the message array to start with a `user` role message.
-  // Strip any leading assistant messages (e.g. synthetic greetings composed
-  // client-side before the first user turn).
-  const firstUserIdx = cleaned.findIndex((m) => m.role === "user");
-  if (firstUserIdx < 0) {
+  // Normalize the transcript to satisfy Anthropic's Messages API contract:
+  // starts with user, alternating roles, no empty content. See
+  // lib/anthropicMessages.ts for details and the rationale.
+  const anthropicMessages = sanitizeForAnthropic(body.messages);
+  if (anthropicMessages.length === 0) {
     return new Response("No user messages provided.", { status: 400 });
   }
-  const anthropicMessages =
-    firstUserIdx > 0 ? cleaned.slice(firstUserIdx) : cleaned;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
