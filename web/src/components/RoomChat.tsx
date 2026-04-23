@@ -117,6 +117,11 @@ export function RoomChat({
       acc += chunk;
       onToken(acc);
     }
+    const tail = decoder.decode();
+    if (tail) {
+      acc += tail;
+      onToken(acc);
+    }
     return acc;
   }
 

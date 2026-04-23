@@ -151,6 +151,14 @@ export function LessonDiscussion({
             );
             setPosts(running);
           }
+          const tail = decoder.decode();
+          if (tail) {
+            acc += tail;
+            running = running.map((p) =>
+              p.id === placeholderId ? { ...p, content: acc } : p,
+            );
+            setPosts(running);
+          }
           persist(running);
         } catch (err) {
           running = running.map((p) =>

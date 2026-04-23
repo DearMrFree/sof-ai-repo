@@ -71,6 +71,19 @@ export function AgentChat({ agent }: { agent: Agent }) {
           return copy;
         });
       }
+      const tail = decoder.decode();
+      if (tail) {
+        acc += tail;
+        setMessages((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = {
+            role: "assistant",
+            agentId: agent.id,
+            content: acc,
+          };
+          return copy;
+        });
+      }
     } catch (err) {
       setMessages((m) => {
         const copy = [...m];
