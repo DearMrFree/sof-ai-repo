@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Bot, CheckCircle2, ExternalLink, GitPullRequest, Rocket, Sparkles } from "lucide-react";
+import { useToast } from "@/components/Toast";
 
 interface Capstone {
   title: string;
@@ -11,7 +12,7 @@ interface Capstone {
 }
 
 type SessionState =
-  | { phase: "idle" }
+  | { phase: "idle"; error?: string }
   | { phase: "launching" }
   | {
       phase: "running";
@@ -35,6 +36,7 @@ export function DevinCapstone({
 }) {
   const [state, setState] = useState<SessionState>({ phase: "idle" });
   const [prompt, setPrompt] = useState(capstone.prompt);
+  const toast = useToast();
 
   async function launch() {
     setState({ phase: "launching" });
@@ -53,7 +55,12 @@ export function DevinCapstone({
         }),
       });
       if (!res.ok) {
-        throw new Error(`Launch failed (${res.status})`);
+        const text = await res.text().catch(() => "");
+        const friendly =
+          res.status === 401
+            ? "Sign in to launch a Devin session."
+            : text || `Launch failed (${res.status}).`;
+        throw new Error(friendly);
       }
       const data = (await res.json()) as {
         sessionUrl: string;
@@ -61,7 +68,7 @@ export function DevinCapstone({
         stub?: boolean;
       };
       if (!data.sessionUrl) {
-        throw new Error("Launch response missing sessionUrl");
+        throw new Error("Launch response missing sessionUrl.");
       }
       if (data.prUrl) {
         setState({
@@ -76,8 +83,11 @@ export function DevinCapstone({
           startedAt: new Date().toISOString(),
         });
       }
-    } catch {
-      setState({ phase: "idle" });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Couldn't reach Devin.";
+      toast.push({ tone: "error", message: msg });
+      setState({ phase: "idle", error: msg });
     }
   }
 
@@ -138,13 +148,23 @@ export function DevinCapstone({
 
         <div className="mt-5">
           {state.phase === "idle" && (
-            <button
-              onClick={launch}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400"
-            >
-              <Sparkles className="h-4 w-4" />
-              Launch Devin session
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={launch}
+                className="inline-flex w-fit items-center gap-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400"
+              >
+                <Sparkles className="h-4 w-4" />
+                {state.error ? "Try again" : "Launch Devin session"}
+              </button>
+              {state.error && (
+                <p
+                  role="alert"
+                  className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200"
+                >
+                  {state.error}
+                </p>
+              )}
+            </div>
           )}
           {state.phase === "launching" && (
             <div className="inline-flex items-center gap-2 rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-300">

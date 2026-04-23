@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { getAgent } from "@/lib/agents";
 import { sanitizeForAnthropic } from "@/lib/anthropicMessages";
 
@@ -14,6 +16,16 @@ interface ChatRequest {
 }
 
 export async function POST(req: NextRequest) {
+  // Gate billable Anthropic calls behind an authenticated session so scripts
+  // can't hammer this endpoint and drain the API-key budget.
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return new Response("Sign in to chat with agents.", {
+      status: 401,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return new Response(
