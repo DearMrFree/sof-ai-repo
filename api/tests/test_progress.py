@@ -1,13 +1,10 @@
-import os
-import tempfile
-
-os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mktemp(suffix='.db')}"
-
-# ruff: noqa: E402, I001
+# DATABASE_URL is overridden to a per-run temp sqlite file in conftest.py so
+# the settings/engine singletons initialize against the temp DB rather than
+# the developer's ./sof_ai.db.
 from fastapi.testclient import TestClient
+
 from sof_ai_api.db import init_db
 from sof_ai_api.main import app
-
 
 init_db()
 client = TestClient(app)

@@ -55,6 +55,9 @@ export async function POST(req: NextRequest) {
   // Strip any leading assistant messages (e.g. synthetic greetings composed
   // client-side before the first user turn).
   const firstUserIdx = cleaned.findIndex((m) => m.role === "user");
+  if (firstUserIdx < 0) {
+    return new Response("No user messages provided.", { status: 400 });
+  }
   const anthropicMessages =
     firstUserIdx > 0 ? cleaned.slice(firstUserIdx) : cleaned;
 
