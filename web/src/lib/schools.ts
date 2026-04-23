@@ -129,6 +129,33 @@ export const SCHOOLS: School[] = [
     },
     courses: [
       {
+        slug: "building-an-ai-lms",
+        title: "Building an AI LMS with Devin",
+        tagline:
+          "A live case study — how Dr. Freedom and Devin built sof.ai, in real time, as the curriculum.",
+        summary:
+          "Each module maps to a real PR in the sof.ai repo. Kickoff → scaffold → agents → classroom → challenges → deploy. You leave with your own scaffolded app, your first AI feature, a live backend, and a feedback loop you ship. Co-taught by Dr. Freedom Cheteni and Devin.",
+        level: "core",
+        status: "in-session",
+        durationWeeks: 10,
+        modules: 4,
+        lessons: 6,
+        enrolled: 38,
+        completion: 22,
+        rating: 5.0,
+        cover: { gradient: ["#f59e0b", "#ec4899"], emoji: "🏗️" },
+        tags: [
+          "case-study",
+          "LMS",
+          "pair-programming",
+          "deploy",
+          "feedback-loop",
+          "founder-led",
+        ],
+        guests: ["claude", "gemini"],
+        href: "/learn/building-an-ai-lms",
+      },
+      {
         slug: "software-engineer",
         title: "Software Engineer, powered by Devin",
         tagline: "From 'I want to build software' to shipping real PRs.",
@@ -1679,7 +1706,7 @@ export const SCHOOLS: School[] = [
         status: "open",
         durationWeeks: 4,
         modules: 4,
-        lessons: 8,
+        lessons: 9,
         enrolled: 1842,
         completion: 68,
         rating: 4.9,

@@ -1,0 +1,80 @@
+---
+title: "Scaffold as scope"
+summary: "Devin's first PR was a scaffold. That choice was itself a scope decision — and most builders get it wrong."
+estimatedMinutes: 15
+---
+
+## What landed in PR #1
+
+Before a single lesson existed, before any agent chat worked, Devin
+opened PR #1 with:
+
+- A Next.js 14 app in `/web`
+- A FastAPI backend in `/api`
+- Shared CI (GitHub Actions) hitting both
+- A `/learn` route that loaded MDX lessons from the filesystem
+- A `/classroom` hub page (empty, but routed)
+- A single seeded program: `software-engineer`
+
+No real AI features yet. No streaming chat. No persona system.
+
+## Why scaffold first
+
+A scaffold is not setup. A scaffold is a *scope statement*.
+
+- Having `/web` + `/api` means: we are web + API, not mobile.
+- Loading MDX from the filesystem means: curriculum is files, not a
+  CMS (yet).
+- Routing `/classroom` with nothing in it means: this is a *place*
+  in the product, not an afterthought.
+
+The first PR of any real project should make the **shape of the
+product visible** — even if it's empty.
+
+## The cost of skipping this
+
+If we had started with "add Claude streaming chat," the project would
+have optimized around *that feature*. The school, the agents, the
+classroom — all of that would have been retrofitted. It would have
+shown.
+
+Scaffold first. Features later.
+
+## Spot the shape
+
+Look at the PR itself: [sof-ai-repo#1][1]. Read the file tree only —
+don't read any file contents. What product shape does it imply?
+
+[1]: https://github.com/DearMrFree/sof-ai-repo/pull/1
+
+Things to notice:
+
+- No `mobile/` directory.
+- No `cms/` directory.
+- `content/programs/` as a top-level concept.
+- `components/` alongside `app/` — React-first.
+
+Each absence is a decision.
+
+## Your turn
+
+Take the kickoff prompt you wrote last lesson. Write the *scaffold
+PR* in your head. Not code — just the file tree that would make the
+product's shape visible.
+
+Include at least:
+
+- The backend choice (or *no backend*).
+- Two routes that name the two most important places in the product.
+- One "content lives here" directory.
+- One "this is what we don't do" absence.
+
+Post your scaffold tree in the lesson discussion. Read three other
+students' trees and comment on *what shape each one implies.*
+
+Next module: adding the social network — agents, rooms, feed.
+
+---
+
+*Inspired by the real PR #1 of DearMrFree/sof-ai-repo. Read the PR to
+compare your scaffold tree to the one Devin shipped.*
