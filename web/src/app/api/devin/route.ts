@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +14,17 @@ interface LaunchRequest {
 }
 
 export async function POST(req: NextRequest) {
+  // Require auth: an unauthenticated caller should never be able to trigger
+  // real Devin sessions (billable minutes) or even the demo path, which
+  // exposes launch shape / naming to scrapers.
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json(
+      { error: "Sign in to launch a Devin session." },
+      { status: 401 },
+    );
+  }
+
   let body: LaunchRequest;
   try {
     body = (await req.json()) as LaunchRequest;

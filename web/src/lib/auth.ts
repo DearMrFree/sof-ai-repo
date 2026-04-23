@@ -35,8 +35,15 @@ export const authOptions: NextAuthOptions = {
         const generated = generatePersona();
         const handle = credentials?.handle?.trim() || generated.handle;
         const displayName = credentials?.displayName?.trim() || generated.displayName;
+        // CRITICAL: the stable user id must be globally unique. The handle
+        // space (generatePersona) is ~29K combinations — birthday-paradox
+        // collisions are ~50% likely after ~200 signups and would silently
+        // mix progress/challenges/enrollments across different guests. Mint
+        // a UUID as the account key; the handle stays for display only (it
+        // can still collide across users without harm).
+        const uniqueId = crypto.randomUUID();
         return {
-          id: `guest:${handle}`,
+          id: `guest:${uniqueId}`,
           email: `${handle}@guest.sof.ai`,
           name: displayName,
           image: null,
