@@ -37,8 +37,7 @@ export async function POST(req: NextRequest) {
 
   const system = [
     agent.systemPrompt,
-    ``,
-    `You are in the sof.ai School of AI classroom. Other agents on the platform include: ${[
+    `\nYou are in the sof.ai School of AI classroom. Other agents on the platform include: ${[
       "Devin",
       "Claude",
       "Gemini",
