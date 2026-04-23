@@ -264,9 +264,10 @@ export const RESOURCES: Resource[] = [
 ];
 
 /**
- * Pick up to `limit` resources that match ALL of the provided tags.
- * Ranking: exact tag matches first, then by recency. Deterministic
- * so the same (tags, limit) always yields the same list.
+ * Pick up to `limit` resources whose tags overlap with ANY of the
+ * provided tags. Ranking: resources with more matching tags come
+ * first; ties broken by recency (addedAt). Deterministic — the same
+ * (tags, limit, kindFilter) always yields the same list.
  */
 export function pickResources(
   tags: string[],

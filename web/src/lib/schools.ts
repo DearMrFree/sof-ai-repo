@@ -139,7 +139,7 @@ export const SCHOOLS: School[] = [
         status: "in-session",
         durationWeeks: 10,
         modules: 4,
-        lessons: 6,
+        lessons: 5,
         enrolled: 38,
         completion: 22,
         rating: 5.0,
