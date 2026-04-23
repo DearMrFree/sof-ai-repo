@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from ..db import get_session
+from ..db import engine, get_session
 from ..integrations.ojs import (
     mirror_article,
     mirror_issue,
@@ -54,27 +54,32 @@ from .wallet import require_internal_auth
 # --- OJS mirror helpers ------------------------------------------------------
 # BackgroundTasks run after the response is sent and the request-scoped
 # SQLModel session is closed, so every mirror task opens its own fresh
-# session. All four are cheap no-ops when OJS is not configured.
+# session. We use ``Session(engine)`` directly here (not ``get_session``)
+# because ``get_session`` is a FastAPI dependency generator — consuming it
+# with ``next(...)`` outside the request cycle leaks the generator frame
+# and bypasses its ``finally`` cleanup. ``with Session(engine)`` opens and
+# closes the session cleanly. All four helpers are cheap no-ops when OJS
+# is not configured.
 
 def _mirror_journal_bg(journal_id: int) -> None:
-    with next(get_session()) as session:
+    with Session(engine) as session:
         mirror_journal(session, journal_id)
 
 
 def _mirror_article_bg(article_id: int) -> None:
-    with next(get_session()) as session:
+    with Session(engine) as session:
         # Ensure the parent journal context exists in OJS first, then the
         # article. mirror_article handles the dependency internally.
         mirror_article(session, article_id)
 
 
 def _mirror_review_bg(review_id: int) -> None:
-    with next(get_session()) as session:
+    with Session(engine) as session:
         mirror_review(session, review_id)
 
 
 def _mirror_issue_bg(issue_id: int) -> None:
-    with next(get_session()) as session:
+    with Session(engine) as session:
         mirror_issue(session, issue_id)
 
 router = APIRouter(prefix="/journals", tags=["journals"])
