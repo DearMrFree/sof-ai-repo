@@ -105,7 +105,7 @@ def mirror_article(session: Session, article_id: int) -> bool:  # noqa: PLR0911
     if not ojs_enabled():
         return False
     a = session.get(JournalArticle, article_id)
-    if a is None or a.ojs_submission_id:
+    if a is None or a.ojs_submission_id is not None:
         return False
 
     # Make sure the parent context exists in OJS first.
@@ -164,11 +164,11 @@ def mirror_review(session: Session, review_id: int) -> bool:  # noqa: PLR0911
     if not ojs_enabled():
         return False
     r = session.get(JournalPeerReview, review_id)
-    if r is None or r.ojs_review_assignment_id:
+    if r is None or r.ojs_review_assignment_id is not None:
         return False
 
     a = session.get(JournalArticle, r.article_id)
-    if a is None or not a.ojs_submission_id:
+    if a is None or a.ojs_submission_id is None:
         return False
 
     j = session.exec(
@@ -235,8 +235,15 @@ def mirror_issue(session: Session, issue_id: int) -> bool:  # noqa: PLR0911
     i = session.get(JournalIssue, issue_id)
     if i is None:
         return False
-    # Already fully synced — idempotent no-op.
-    if i.ojs_issue_id and i.ojs_synced_at and not i.ojs_sync_error:
+    # Already fully synced — idempotent no-op. Using ``is not None``
+    # rather than truthiness so a hypothetical ``id: 0`` from OJS doesn't
+    # slip through and loop phase 2 forever (the docstring's "IS NOT
+    # NULL" invariant is the canonical spelling).
+    if (
+        i.ojs_issue_id is not None
+        and i.ojs_synced_at is not None
+        and not i.ojs_sync_error
+    ):
         return False
 
     j = session.exec(
