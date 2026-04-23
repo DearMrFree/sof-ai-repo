@@ -13,6 +13,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from sof_ai_api import settings as settings_module
 from sof_ai_api.db import engine, init_db
 from sof_ai_api.integrations.ojs import adapter
 from sof_ai_api.integrations.ojs.client import OJSError
@@ -288,8 +289,6 @@ def test_ojs_resync_endpoint_requires_internal_auth(monkeypatch) -> None:
     ``settings.internal_api_key`` directly rather than setting the env
     var (which would be a no-op by that point).
     """
-    from sof_ai_api import settings as settings_module
-
     monkeypatch.setattr(
         settings_module.settings, "internal_api_key", "super-secret-ci-key"
     )
