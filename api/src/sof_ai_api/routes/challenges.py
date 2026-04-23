@@ -6,7 +6,7 @@ friction point in one click and watch it progress from "new" → "shipped".
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, desc, select
 
 from ..db import get_session
@@ -24,7 +24,25 @@ class CreateChallengeRequest(BaseModel):
     body: str = Field(..., min_length=3, max_length=2000)
     tag: str = Field(..., min_length=1, max_length=20)
     page_url: str | None = Field(default=None, max_length=500)
+    program_slug: str | None = Field(default=None, max_length=120)
     lesson_slug: str | None = Field(default=None, max_length=120)
+
+    @field_validator("page_url")
+    @classmethod
+    def _validate_page_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        # Only allow http(s). Rendering this value as an anchor href elsewhere
+        # means a javascript: / data: / vbscript: scheme would execute on
+        # click even with target="_blank" (not a reliable defense across
+        # browsers). Reject at the API boundary.
+        lowered = v.lower()
+        if not (lowered.startswith("http://") or lowered.startswith("https://")):
+            raise ValueError("page_url must be an http(s) URL")
+        return v
 
 
 class UpdateStatusRequest(BaseModel):
@@ -47,6 +65,7 @@ def create_challenge(
         body=body.body.strip(),
         tag=body.tag,
         page_url=body.page_url,
+        program_slug=body.program_slug,
         lesson_slug=body.lesson_slug,
     )
     session.add(challenge)

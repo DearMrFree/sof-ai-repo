@@ -1,0 +1,87 @@
+---
+title: "Two hosts, one domain"
+summary: "Why sof.ai's frontend lives on Vercel, its backend on Fly.io, and how DNS holds them together."
+estimatedMinutes: 16
+---
+
+## The setup
+
+sof.ai is deployed across two hosts:
+
+- **Frontend**: Vercel, pulling from the repo's `web/` directory.
+  Auto-redeploys on every push to main.
+- **Backend**: Fly.io, a single machine in `iad` region, SQLite on
+  a persistent volume.
+- **Domain**: `sof.ai`, registered on Namecheap. `@` A record → Vercel
+  (76.76.21.21). `www` CNAME → Vercel. `api` CNAME → Fly.
+
+One domain, two hosts, no third-party reverse proxy.
+
+## Why not Vercel for both
+
+Vercel is excellent at Next.js; we use it. It is not designed to run
+persistent processes with filesystem state. Fly is.
+
+The backend stores challenges (and, soon, more) in SQLite. SQLite
+needs a persistent filesystem. Fly gives us that with a Volume. One
+512MB shared VM in `iad`, one mounted volume at `/data`, DATABASE_URL
+= `sqlite:////data/sof_ai.db`.
+
+If we outgrow SQLite, we migrate the `Challenge` model to Postgres.
+The model layer is already SQLModel, so the change is a config flip
++ a migration. We intentionally didn't over-engineer past SQLite
+until we had users.
+
+## The deploy story in one paragraph
+
+Dr. Freedom runs `fly tokens create deploy -a sofai` locally, pastes
+the token into Devin. Devin writes a `Dockerfile` (Python 3.12-slim
++ uv + the FastAPI app), a `fly.toml` (single machine, volume mount,
+health check on `/health`), runs `fly deploy`. Thirty seconds later,
+`curl https://sofai.fly.dev/health` returns `{"status":"ok"}`.
+
+Vercel is the same story with fewer steps. Frontend connects to the
+backend via `NEXT_PUBLIC_API_BASE_URL`, set to `https://api.sof.ai`.
+
+## The DNS reveal
+
+On Namecheap Advanced DNS:
+
+- `A @ 76.76.21.21` → Vercel
+- `CNAME www cname.vercel-dns.com.` → Vercel
+- `CNAME api sofai.fly.dev.` → Fly
+
+Three records. That's the entire glue.
+
+## What to internalize
+
+**Pick the smallest hosting setup that separates concerns by state.**
+
+- Stateless frontend → platform optimized for stateless frontends.
+- Stateful backend → platform optimized for persistent state.
+- Domain → the glue.
+
+You do not need Kubernetes. You do not need a reverse proxy in front
+of it. You do not need a separate CDN config for the API subdomain.
+You need *three DNS records.*
+
+## Your turn
+
+Write your own 3-record DNS plan for a project you're building or
+would like to build. Use the exact pattern:
+
+- `A @ <ip>` → frontend host
+- `CNAME www <hostname>` → same frontend host
+- `CNAME <service> <hostname>` → backend host
+
+Post it in the discussion. Optional: describe the state your backend
+holds and why it can't live in the frontend platform.
+
+Next: the iteration loop after you go live. What Dr. Freedom and
+Devin actually do week-over-week with the challenges board.
+
+---
+
+*Based on sof.ai's real production setup — Vercel for `web/`, Fly.io
+for `api/`, Namecheap DNS at the top. The fly.toml, Dockerfile, and
+rewrite config are all in the repo.*

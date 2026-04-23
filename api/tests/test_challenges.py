@@ -51,6 +51,42 @@ def test_reject_bad_tag() -> None:
     assert r.status_code == 400
 
 
+def test_reject_javascript_page_url() -> None:
+    # A javascript: URL must be rejected at the API boundary. Rendering it as
+    # an anchor href elsewhere would let an authenticated attacker stage a
+    # one-click XSS against whoever opens the triage board.
+    r = client.post(
+        "/challenges",
+        json={
+            "user_id": "u-feedback-xss",
+            "handle": "freedom",
+            "body": "crafted payload",
+            "tag": "idea",
+            "page_url": "javascript:alert(1)",
+        },
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_accept_program_and_lesson_slug() -> None:
+    r = client.post(
+        "/challenges",
+        json={
+            "user_id": "u-feedback-nav",
+            "handle": "freedom",
+            "body": "lesson nav confusing",
+            "tag": "confusing",
+            "program_slug": "software-engineer",
+            "lesson_slug": "reading-code",
+            "page_url": "https://sof.ai/learn/software-engineer/reading-code",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["program_slug"] == "software-engineer"
+    assert body["lesson_slug"] == "reading-code"
+
+
 def test_reject_bad_status() -> None:
     create = client.post(
         "/challenges",

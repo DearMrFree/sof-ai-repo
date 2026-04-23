@@ -18,9 +18,22 @@ interface Challenge {
   body: string;
   tag: string;
   page_url: string | null;
+  program_slug: string | null;
   lesson_slug: string | null;
   status: "new" | "triaged" | "building" | "shipped";
   created_at: string;
+}
+
+/**
+ * Only render a page_url anchor when the URL uses an http(s) scheme. The
+ * backend rejects other schemes, but defense-in-depth at the render site
+ * prevents a legacy row or a compromised backend from shipping a
+ * javascript: / data: href through.
+ */
+function isSafeHttpUrl(s: string | null): s is string {
+  if (!s) return false;
+  const lower = s.toLowerCase();
+  return lower.startsWith("http://") || lower.startsWith("https://");
 }
 
 const TAG_EMOJI: Record<string, string> = {
@@ -163,14 +176,21 @@ export default async function ChallengesPage() {
                       <>
                         <span>·</span>
                         <Link
-                          href={`/learn/software-engineer/${c.lesson_slug}`}
+                          // Historical rows (created before program_slug
+                          // was added to the Challenge model) have
+                          // program_slug = null. Fall back to
+                          // "software-engineer" because it was the only
+                          // program that existed when those rows were
+                          // written — dropping the link silently hides
+                          // real context on the triage board.
+                          href={`/learn/${c.program_slug ?? "software-engineer"}/${c.lesson_slug}`}
                           className="text-indigo-300 hover:underline"
                         >
                           {c.lesson_slug}
                         </Link>
                       </>
                     )}
-                    {c.page_url && (
+                    {isSafeHttpUrl(c.page_url) && (
                       <>
                         <span>·</span>
                         <a

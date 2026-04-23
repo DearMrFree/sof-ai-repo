@@ -34,12 +34,24 @@ export async function POST(req: Request) {
     body?: unknown;
     tag?: unknown;
     page_url?: unknown;
+    program_slug?: unknown;
     lesson_slug?: unknown;
   };
 
   const body = typeof p.body === "string" ? p.body.trim() : "";
   const tag = typeof p.tag === "string" ? p.tag : "";
-  const pageUrl = typeof p.page_url === "string" ? p.page_url : null;
+  const rawPageUrl = typeof p.page_url === "string" ? p.page_url.trim() : "";
+  // Defense in depth: reject non-http(s) schemes at the proxy too, so an
+  // attacker can't bypass the FastAPI validator via a direct hit. Empty /
+  // missing is allowed (becomes null).
+  const pageUrl =
+    rawPageUrl &&
+    (rawPageUrl.toLowerCase().startsWith("http://") ||
+      rawPageUrl.toLowerCase().startsWith("https://"))
+      ? rawPageUrl
+      : null;
+  const programSlug =
+    typeof p.program_slug === "string" ? p.program_slug : null;
   const lessonSlug =
     typeof p.lesson_slug === "string" ? p.lesson_slug : null;
 
@@ -61,6 +73,12 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  if (rawPageUrl && !pageUrl) {
+    return NextResponse.json(
+      { error: "page_url must be an http(s) URL." },
+      { status: 400 },
+    );
+  }
 
   const handle =
     sessionUser.name ??
@@ -76,6 +94,7 @@ export async function POST(req: Request) {
         body,
         tag,
         page_url: pageUrl,
+        program_slug: programSlug,
         lesson_slug: lessonSlug,
       }),
       cache: "no-store",

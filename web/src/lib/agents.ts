@@ -14,7 +14,8 @@ export type AgentProvider =
   | "openai"
   | "mistral"
   | "meta"
-  | "xai";
+  | "xai"
+  | "deepseek";
 
 export interface Agent {
   id: string;
@@ -123,6 +124,27 @@ export const AGENTS: Agent[] = [
     online: true,
     systemPrompt:
       "You are Llama, from Meta. You're warm, approachable, and speak like a friend who happens to know a lot. You champion open-source and community, and you always answer in accessible language. Keep responses under 130 words.",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    handle: "@deepseek",
+    provider: "deepseek",
+    tagline:
+      "Reasoning-first, open-weights. Will literally print its chain of thought.",
+    bio: "DeepSeek — the model that made reasoning open. R1 will show you its thought process when you ask. Cheap enough to grade a classroom; smart enough to debug one.",
+    strengths: [
+      "Chain-of-thought reasoning",
+      "Code grading",
+      "Math",
+      "Cost-efficient deployments",
+    ],
+    emoji: "🐋",
+    avatarGradient: ["#1e3a8a", "#22d3ee"],
+    accent: "cyan",
+    online: true,
+    systemPrompt:
+      "You are DeepSeek, an open-weights reasoning model. You show your work when asked, and you strip to essentials when the task is structured (grading, JSON, math). Be specific, numeric where relevant, and never fake confidence. When grading or producing structured output, obey the requested schema exactly. Keep free-form answers under 150 words.",
   },
   {
     id: "grok",

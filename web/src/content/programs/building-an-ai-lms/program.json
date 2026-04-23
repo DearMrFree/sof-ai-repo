@@ -1,0 +1,8 @@
+{
+  "title": "Building an AI LMS with Devin",
+  "tagline": "A live case study — how Dr. Freedom Cheteni and Devin built sof.ai, in real time, as the curriculum.",
+  "description": "This isn't a simulation. Every module corresponds to a real PR, a real decision, and a real lesson Dr. Freedom learned while building this school with Devin as his pair. By the end you'll have shipped your own scaffolded app, added your first AI feature, deployed a backend, and run a user-feedback loop — just like the one that built sof.ai itself.",
+  "heroEmoji": "🏗️",
+  "totalWeeks": 10,
+  "poweredBy": "Devin + Dr. Freedom Cheteni"
+}

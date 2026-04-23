@@ -7,6 +7,7 @@ import { TutorChat } from "@/components/TutorChat";
 import { LessonFooter } from "@/components/LessonFooter";
 import { DevinCapstone } from "@/components/DevinCapstone";
 import { LessonDiscussion } from "@/components/LessonDiscussion";
+import { RecommendVideoButton } from "@/components/RecommendVideoButton";
 import {
   findAdjacentLessons,
   flattenLessons,
@@ -94,6 +95,13 @@ export default function LessonPage({
                 capstone={lesson.devinCapstone}
               />
             )}
+
+            <RecommendVideoButton
+              topic={`${program.title} — ${lesson.title}`}
+              programSlug={program.slug}
+              lessonSlug={lesson.slug}
+              lessonTitle={lesson.title}
+            />
 
             <LessonDiscussion
               programSlug={program.slug}

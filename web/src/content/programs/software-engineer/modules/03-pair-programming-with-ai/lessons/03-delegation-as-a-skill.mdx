@@ -1,0 +1,92 @@
+---
+title: "Delegation as a skill"
+summary: "The anatomy of a good task description, the four kinds of context to hand over, and how to avoid the 'almost right' trap."
+estimatedMinutes: 15
+---
+
+## The skill you didn't know you needed
+
+When you delegate to a human junior engineer, you know to:
+
+- describe what "done" looks like,
+- point them at relevant code,
+- share constraints you only know in your head,
+- and check in before they've written too much of the wrong thing.
+
+All of this applies *harder* when delegating to an AI pair, because the
+AI can't ask you at lunch, can't read your slack, and won't hesitate
+before going down the wrong path for 600 lines.
+
+## Anatomy of a good task description
+
+A good task description has four parts:
+
+### 1. The goal, in user-visible terms
+
+Not "refactor this function." "After this change, signing in with a
+previously-used email should not prompt for a password."
+
+### 2. The constraints
+
+"Don't touch the database schema. We're on SQLite for local dev and
+Postgres in production — your change has to work on both. Follow the
+existing error-handling pattern in `auth.ts`."
+
+### 3. The *non*-constraints
+
+"You can add new files. You can add dependencies if you need to. You
+don't have to preserve the existing function signature."
+
+People skip this and it's the #1 cause of "almost right" output. If
+you don't say "you can add dependencies," the agent will twist itself
+into knots avoiding them.
+
+### 4. The evidence of success
+
+"A new test in `auth.test.ts` that fails without your change and passes
+after it. A manual verification script I can paste into a fresh shell
+to reproduce." Not "make sure it works."
+
+## The four kinds of context
+
+When you delegate, you hand over four distinct kinds of context — and
+leaving any of them out produces a characteristic failure mode:
+
+| Context | Leaving it out produces… |
+|---|---|
+| **Structural** ("this lives at X, imports from Y") | The agent makes up file paths. |
+| **Behavioral** ("when the user clicks, Z happens") | The agent builds the wrong thing competently. |
+| **Historical** ("we tried A and it didn't work because…") | The agent confidently re-proposes A. |
+| **Value-based** ("we prefer boring solutions") | The agent over-engineers. |
+
+Say all four out loud (or in your prompt) before you hand off.
+
+## The "almost right" trap
+
+The most dangerous output from an AI pair is *almost right.*
+
+- All the tests pass, but the test matrix doesn't cover the case you
+  cared about.
+- The code looks clean, but it changes a behavior in a sibling file you
+  didn't ask about.
+- The refactor is plausible, but introduces a new dependency on something
+  your team has been explicitly avoiding.
+
+You will miss these unless you *read as if you distrust the output.*
+Treat every agent PR the way you'd treat a PR from a new hire: skim
+broadly, then pick one or two non-obvious places to read line-by-line.
+
+## Practice
+
+Pick a real task in your current project — something small enough to
+ship today. Before you let any agent touch it, write out:
+
+1. The goal, in one sentence, in user-visible terms.
+2. Two constraints.
+3. One explicit non-constraint.
+4. What "done" looks like — concretely.
+
+Then hand it off. Notice how much less you have to correct afterwards.
+
+Next lesson: subagents — when a single agent isn't the right shape for
+the work.

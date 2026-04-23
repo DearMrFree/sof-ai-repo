@@ -1,0 +1,130 @@
+---
+title: "Cost, errors, and the shape of a production AI endpoint"
+summary: "Counting tokens before you cry, retry policy, user-visible error messages, and the one-page checklist every AI route should pass."
+estimatedMinutes: 14
+---
+
+## The bill
+
+LLM requests cost money per token. A token is roughly 3/4 of a word.
+Both input (the context you send) and output (the reply) count.
+
+A rough rule of thumb for back-of-the-envelope budgeting:
+
+- A short chat reply: ~300-500 output tokens.
+- A long explanation: ~1,500-3,000 tokens.
+- A long document summary: input might be 10K+ tokens.
+
+A reasonable top-tier chat model is on the order of a few dollars per
+million tokens. Do the math:
+
+- 1 chat turn averages ~1K tokens → **a few tenths of a cent.**
+- But 1,000 users doing 10 turns each is 10M tokens → **tens of
+  dollars**.
+- A single unauthenticated endpoint scraped overnight is **hundreds
+  to thousands of dollars**.
+
+## Capping worst case
+
+Three knobs to always use:
+
+1. **`max_tokens` on every call.** Never leave this unset. A runaway
+   reply can easily be 10x your intended cost.
+2. **An auth gate on every route.** (See last lesson.)
+3. **A per-user rate limit.** Even signed-in users can accidentally
+   spam if your UI has a bug. Start conservative: 30 requests per
+   user per minute is almost always enough.
+
+## Error shape
+
+The three errors you'll actually see:
+
+### `429 Too Many Requests`
+
+You hit the provider's rate limit. The right response is **exponential
+backoff with jitter**:
+
+```ts
+for (let attempt = 0; attempt < 3; attempt++) {
+  try {
+    return await client.messages.create(...);
+  } catch (err) {
+    if (err.status !== 429 || attempt === 2) throw err;
+    const wait = 500 * Math.pow(2, attempt) + Math.random() * 200;
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+```
+
+### `401 Unauthorized`
+
+Your API key is wrong or revoked. **Don't retry.** Log, alert, fail
+the request cleanly. A retry loop on a 401 just produces log noise.
+
+### `529 Overloaded` (or provider-equivalent)
+
+The provider is sagging. Retry with backoff, but after one retry
+consider falling back to a cheaper/faster model if you have one.
+
+## User-visible errors
+
+When something goes wrong, what do you show?
+
+- **Don't show the raw provider error** — it may contain internal
+  identifiers, and it confuses users.
+- **Do distinguish 3 cases** in the UI:
+  - "I'm overloaded right now. Try again in a moment." (429/529)
+  - "I need you to sign in to use this." (401 from auth gate)
+  - "Something went wrong on my end." (everything else)
+
+Never let an async error fail silently. Every streaming chat
+consumer in this project wires errors to a toast — a disappearing
+banner — because a button that just stops working is worse than one
+that fails loudly.
+
+## The one-page checklist
+
+Before any AI route ships to real traffic, it should pass *every* item:
+
+- [ ] **Auth gate** returns 401 before touching the provider.
+- [ ] **`max_tokens` set** on every `.create()` call.
+- [ ] **Input validation** — JSON-parse with a try/catch, validate
+      required fields, reject oversized payloads.
+- [ ] **System-prompt sanitization** — if any field in the prompt
+      comes from user input, escape / length-limit it. Prompt
+      injection is a real threat.
+- [ ] **Timeout** on the provider call (30-60s max — users will
+      reload).
+- [ ] **Retry** on 429/529 with backoff; no retry on 4xx auth errors.
+- [ ] **User-visible error** for each of the 3 error classes above.
+- [ ] **Streaming tail flush** if the route streams (see lesson 2).
+- [ ] **Logging** with a request ID you can grep later — but **never
+      the full prompt content** if it might contain PII.
+- [ ] **Cost ceiling per user per minute** — enforced at the route
+      level.
+
+Put this checklist in your repo. Review every new AI route against
+it.
+
+## Module capstone
+
+You're about to write a small production-shaped AI endpoint
+yourself. Pick one:
+
+- **Option A: Summarizer.** `POST /api/summarize` — accepts a URL,
+  fetches it, summarizes in 3 bullets. Must pass the checklist.
+- **Option B: Tutor.** `POST /api/tutor` — accepts a lesson title
+  and a chat history, streams a reply from the lesson's context.
+  Must pass the checklist.
+
+Either one. Ship it. Get it to the point where a hostile caller
+can't burn your budget, a real user can't see an ugly error, and
+your future self can debug a failed request in under a minute.
+
+Next module: **Model Context Protocol.** Because "my agent calls my
+tool" isn't enough — you need every agent to be able to call every
+tool, and that requires a protocol.
+
+---
+
+*Inspired by Anthropic's ["Building with the Claude API"](https://claude.com/resources/courses). The auth-gate checklist is drawn from real bugs we found and fixed in this project (see [`/api/tutor`](../../../api/tutor), [`/api/agent-chat`](../../../api/agent-chat), and [`/api/devin`](../../../api/devin) route files).*

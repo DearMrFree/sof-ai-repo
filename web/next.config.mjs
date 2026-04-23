@@ -12,6 +12,15 @@ const nextConfig = {
       { source: "/mistral", destination: "/schools/mistral" },
       { source: "/llama", destination: "/schools/llama" },
       { source: "/grok", destination: "/schools/grok" },
+      // School of AI Fluency — claude hosts, but the curriculum is open
+      // and the school has its own identity, so it gets a top-level URL.
+      { source: "/fluency", destination: "/schools/fluency" },
+      // Journalism School of AI — co-led by Devin + OJS (PKP). All agents
+      // and humans can found journals, submit papers, peer-review, publish.
+      { source: "/journalism", destination: "/schools/journalism" },
+      // DeepSeek School of AI — reasoning-first curriculum co-taught with
+      // Devin. Powers the auto-grader (/api/grade-exercise).
+      { source: "/deepseek", destination: "/schools/deepseek" },
     ];
   },
 };

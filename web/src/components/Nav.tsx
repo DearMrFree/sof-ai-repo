@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2, School } from "lucide-react";
+import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2, School, Wallet as WalletIcon, BookOpen } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { EducoinChip } from "@/components/EducoinChip";
 
 const navLinks = [
   { href: "/learn", label: "Learn", icon: GraduationCap },
@@ -12,7 +13,9 @@ const navLinks = [
   { href: "/classroom/feed", label: "Feed", icon: Newspaper },
   { href: "/classroom/assignments", label: "Assignments", icon: ClipboardList },
   { href: "/schools", label: "Schools", icon: School },
+  { href: "/journals", label: "Journals", icon: BookOpen },
   { href: "/u", label: "People", icon: UserCircle2 },
+  { href: "/wallet", label: "Wallet", icon: WalletIcon },
 ];
 
 export function Nav() {
@@ -78,6 +81,12 @@ export function Nav() {
             <div className="h-8 w-20 animate-pulse rounded-md bg-zinc-800" />
           ) : user ? (
             <div className="flex items-center gap-2">
+              {(user as { id?: string }).id ? (
+                <EducoinChip
+                  ownerType="user"
+                  ownerId={(user as { id?: string }).id as string}
+                />
+              ) : null}
               <div className="hidden items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 sm:flex">
                 <User className="h-3.5 w-3.5" />
                 {user.name ?? user.email}

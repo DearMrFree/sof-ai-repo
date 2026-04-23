@@ -19,6 +19,7 @@ import { BuildGrid } from "@/components/BuildGrid";
 import { FollowButton } from "@/components/FollowButton";
 import { ShareButton } from "@/components/ShareButton";
 import { AgentAvatar } from "@/components/AgentAvatar";
+import { WalletCard } from "@/components/WalletCard";
 
 export function generateStaticParams() {
   return [
@@ -373,6 +374,13 @@ export default function ProfilePage({
 
         {/* Right rail */}
         <aside className="space-y-6">
+          {/* Educoin® wallet card — every profile (human or agent) has one */}
+          <WalletCard
+            ownerType={profile.kind === "agent" ? "agent" : "user"}
+            ownerId={profile.handle}
+            displayName={profile.name}
+          />
+
           {/* Agent collaborators */}
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">

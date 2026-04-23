@@ -1,0 +1,145 @@
+---
+title: "Streaming, chunks, and the TextDecoder flush bug"
+summary: "Why your chat UI feels snappy, how SSE actually works, and the one-line bug that drops emoji at chunk boundaries."
+estimatedMinutes: 14
+---
+
+## Why stream?
+
+A non-streamed LLM call looks like this from the user's point of view:
+
+```
+[sends message]
+[stares at a spinner]
+[... 6 seconds of nothing ...]
+[entire reply appears at once]
+```
+
+A streamed call looks like this:
+
+```
+[sends message]
+[first word appears ~400ms later]
+[words keep flowing in, sentence-by-sentence]
+```
+
+The total time is the same. The perceived latency is 10x better,
+because the user knows something's happening and can start reading.
+
+Every chat UI you've ever used streams. There is no downside.
+
+## How streaming actually works on the wire
+
+The dominant pattern is **Server-Sent Events (SSE)**. The server keeps
+the HTTP connection open and writes newline-delimited JSON events to
+it. Each event is an incremental piece of the reply.
+
+```
+event: content_block_delta
+data: {"type":"text_delta","delta":{"type":"text","text":"Pa"}}
+
+event: content_block_delta
+data: {"type":"text_delta","delta":{"type":"text","text":"ris"}}
+
+event: message_stop
+data: {}
+```
+
+Your client reads this stream, extracts the `text` pieces, and
+appends them to the visible message.
+
+## The two-line consumer pattern
+
+Every streamed API consumer boils down to this:
+
+```ts
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let acc = "";
+
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  acc += decoder.decode(value, { stream: true });
+  // parse any complete SSE events out of `acc`, render them,
+  // and keep any partial event in `acc` for the next iteration
+}
+```
+
+Two things to notice:
+
+- `getReader()` gives you a byte stream. You decode it chunk-by-chunk.
+- `{ stream: true }` tells `TextDecoder` that there may be *more bytes
+  coming* — so if a multi-byte UTF-8 character (like an emoji) spans a
+  chunk boundary, it'll hold on to the partial bytes until the next
+  chunk rather than emit a broken character.
+
+## The flush-after-loop bug
+
+This is the one almost every chat UI gets wrong. Look carefully:
+
+```ts
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;          // ← we break out here
+  acc += decoder.decode(value, { stream: true });
+}
+// We never called decoder.decode() with no args!
+```
+
+If the final chunk of the stream ends mid-emoji, those partial bytes
+stay inside the `TextDecoder` and are never emitted. The reply
+silently loses its last character.
+
+The fix is one line:
+
+```ts
+// After the loop:
+const tail = decoder.decode();        // no args = flush
+if (tail) acc += tail;
+```
+
+This is a real bug we found and fixed across four streaming consumers
+in this project. Symptom: messages ending in 🎉 or a non-ASCII letter
+would sometimes be missing the trailing character. It happened one
+time in fifty — just often enough to feel flaky without being
+reproducible.
+
+## Parsing SSE events out of the accumulator
+
+After decoding, you still need to split events. A robust split:
+
+```ts
+const parts = acc.split("\n\n");
+acc = parts.pop() ?? "";     // keep the last partial event
+
+for (const raw of parts) {
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (payload === "[DONE]") return;
+    const event = JSON.parse(payload);
+    onEvent(event);
+  }
+}
+```
+
+Notice the `parts.pop()` — the last element after a split may be an
+*incomplete* event (bytes arrived mid-event). You hold onto it and
+prepend it to the next chunk.
+
+## Homework
+
+Find any streamed-text consumer in a project you're working on. Trace:
+
+1. Does it decode with `{ stream: true }`?
+2. Does it flush after the loop?
+3. Does it keep a partial tail between chunks?
+
+If any of the three is missing, you have a latent bug.
+
+Next: tool use — how you let the model "call functions" in your code.
+
+---
+
+*Inspired by Anthropic's ["Building with the Claude API"](https://claude.com/resources/courses). The TextDecoder flush bug is a real one we fixed across four streaming consumers in this project.*
