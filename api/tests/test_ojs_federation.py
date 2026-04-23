@@ -268,6 +268,61 @@ def test_resync_pending_backfills_every_row(monkeypatch) -> None:
         assert still_pending.ojs_context_path == "resync-test"
 
 
+def test_mirror_issue_recovers_from_publish_failure(monkeypatch) -> None:
+    """Two-phase mirror_issue: if create succeeds but publish fails, the
+    row keeps its ``ojs_issue_id`` and records the publish error. The
+    next ``resync_pending`` call must retry *only* the publish phase —
+    never double-creating the OJS issue.
+    """
+    fake = FakeOJSClient()
+    fake.fail_once_on = "publish_issue"
+    _enable_ojs(monkeypatch, fake)
+
+    with Session(engine) as s:
+        j = _insert_journal(s, slug="publish-retry-test", eic="u-pr")
+        # mirror_issue requires the parent context to already exist in OJS.
+        assert adapter.mirror_journal(s, j.id or 0) is True
+        s.refresh(j)
+        i = JournalIssue(
+            journal_slug=j.slug,
+            volume=1,
+            number=1,
+            title="Publish retry",
+            description="",
+        )
+        s.add(i)
+        s.commit()
+        s.refresh(i)
+
+        # First attempt: create_issue succeeds, publish_issue raises.
+        assert adapter.mirror_issue(s, i.id or 0) is False
+        s.refresh(i)
+        assert i.ojs_issue_id == 303  # create ran and persisted the id
+        assert i.ojs_synced_at is None
+        assert i.ojs_sync_error is not None
+        assert "simulated publish_issue failure" in (i.ojs_sync_error or "")
+
+        # The create-phase filter in resync_pending (ojs_issue_id IS NULL)
+        # would *miss* this row — this is the exact bug Devin Review caught.
+        # The publish-phase filter (ojs_synced_at IS NULL OR ojs_sync_error
+        # IS NOT NULL) must pick it up instead.
+        result = adapter.resync_pending(s)
+        assert result["issues"] >= 1
+
+        s.refresh(i)
+        assert i.ojs_issue_id == 303  # unchanged — no second create happened
+        assert i.ojs_synced_at is not None
+        assert i.ojs_sync_error is None
+
+        # Bookkeeping check: FakeOJSClient.create_issue was called exactly
+        # once across both attempts, publish_issue was called twice
+        # (first raised, second succeeded).
+        create_calls = [c for c in fake.calls if c[0] == "create_issue"]
+        publish_calls = [c for c in fake.calls if c[0] == "publish_issue"]
+        assert len(create_calls) == 1
+        assert len(publish_calls) == 2
+
+
 def test_ojs_status_endpoint_reports_flag(monkeypatch) -> None:
     monkeypatch.delenv("OJS_BASE_URL", raising=False)
     monkeypatch.delenv("OJS_API_TOKEN", raising=False)

@@ -188,10 +188,31 @@ def mirror_review(session: Session, review_id: int) -> bool:
 
 
 def mirror_issue(session: Session, issue_id: int) -> bool:
+    """Mirror a sof.ai issue to OJS in two phases: create, then publish.
+
+    Each phase is independently retry-safe so a transient failure on
+    ``publish_issue`` never leaves the issue unrecoverable:
+
+    * Phase 1 (create): if ``ojs_issue_id`` is still ``NULL``, we call
+      ``POST /issues``. On failure we record the error and bail — the
+      row is still visible to ``resync_pending``'s create-phase filter.
+    * Phase 2 (publish): runs whenever ``ojs_issue_id`` is set but the
+      row still carries a sync error (or has never been marked synced).
+      On failure we keep the ``ojs_issue_id`` and re-record the error,
+      so the next ``resync_pending`` call picks the row up again via
+      its publish-phase filter.
+
+    A fully-mirrored row has ``ojs_issue_id IS NOT NULL`` **and**
+    ``ojs_sync_error IS NULL`` **and** ``ojs_synced_at IS NOT NULL`` —
+    any row that doesn't meet all three is eligible for retry.
+    """
     if not ojs_enabled():
         return False
     i = session.get(JournalIssue, issue_id)
-    if i is None or i.ojs_issue_id:
+    if i is None:
+        return False
+    # Already fully synced — idempotent no-op.
+    if i.ojs_issue_id and i.ojs_synced_at and not i.ojs_sync_error:
         return False
 
     j = session.exec(
@@ -200,35 +221,49 @@ def mirror_issue(session: Session, issue_id: int) -> bool:
     if j is None or not j.ojs_context_path:
         return False
 
+    # --- Phase 1: create the OJS issue if we haven't already. ---------------
+    if i.ojs_issue_id is None:
+        try:
+            resp = _client().create_issue(
+                j.ojs_context_path,
+                {
+                    "volume": i.volume,
+                    "number": str(i.number),
+                    "title": {
+                        "en": i.title or f"Volume {i.volume}, Issue {i.number}"
+                    },
+                    "description": {"en": i.description},
+                },
+            )
+        except OJSError as exc:
+            _record_error(i, session, exc)
+            return False
+
+        raw_id = resp.get("id")
+        if not isinstance(raw_id, int):
+            _record_error(
+                i, session, OJSError("OJS create_issue did not return an id")
+            )
+            return False
+        i.ojs_issue_id = raw_id
+        # Persist the id *before* we try to publish so that even if
+        # publish_issue crashes hard (OOM / process kill) we don't leak a
+        # second OJS issue on the next retry.
+        session.add(i)
+        session.commit()
+
+    # --- Phase 2: publish. Always runs after a successful create and on any
+    # retry where ojs_issue_id is set but we're not marked cleanly synced.
     try:
-        resp = _client().create_issue(
-            j.ojs_context_path,
-            {
-                "volume": i.volume,
-                "number": str(i.number),
-                "title": {"en": i.title or f"Volume {i.volume}, Issue {i.number}"},
-                "description": {"en": i.description},
-            },
-        )
+        _client().publish_issue(j.ojs_context_path, i.ojs_issue_id)
     except OJSError as exc:
         _record_error(i, session, exc)
         return False
 
-    raw_id = resp.get("id")
-    ojs_issue_id = int(raw_id) if isinstance(raw_id, int) else None
-    i.ojs_issue_id = ojs_issue_id
     i.ojs_synced_at = _utcnow()
     i.ojs_sync_error = None
     session.add(i)
     session.commit()
-
-    # Immediately publish the OJS issue to mirror our native semantics.
-    if ojs_issue_id is not None:
-        try:
-            _client().publish_issue(j.ojs_context_path, ojs_issue_id)
-        except OJSError as exc:
-            _record_error(i, session, exc)
-            return False
     return True
 
 
@@ -283,9 +318,14 @@ def resync_pending(session: Session) -> dict[str, int]:
         if r.id and mirror_review(session, r.id):
             reviews += 1
 
+    # Issues are special: they go through create+publish, either of which
+    # can fail on its own. Any row missing a final synced_at (or carrying
+    # a persisted error) is a candidate for retry — mirror_issue itself
+    # picks the correct phase based on the row's state.
     i_rows = session.exec(
         select(JournalIssue).where(
-            JournalIssue.ojs_issue_id.is_(None)  # type: ignore[union-attr]
+            (JournalIssue.ojs_synced_at.is_(None))  # type: ignore[union-attr]
+            | (JournalIssue.ojs_sync_error.is_not(None))  # type: ignore[union-attr]
         )
     ).all()
     for i in i_rows:
