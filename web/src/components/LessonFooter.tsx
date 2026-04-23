@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle } from "lucide-react";
-import { isLessonComplete, markLessonComplete, readProgress } from "@/lib/progress";
+import {
+  isLessonComplete,
+  markLessonComplete,
+  readProgress,
+  writeProgress,
+} from "@/lib/progress";
 
 export function LessonFooter({
   programSlug,
@@ -27,10 +32,12 @@ export function LessonFooter({
 
   function toggle() {
     if (done) {
-      // unmark
+      // unmark — go through writeProgress so the storage key stays in sync
+      // with markLessonComplete/readProgress (both use the KEY constant in
+      // lib/progress.ts).
       const state = readProgress();
       if (state[programSlug]) delete state[programSlug][lessonSlug];
-      window.localStorage.setItem("sof.ai:progress:v1", JSON.stringify(state));
+      writeProgress(state);
       setDone(false);
     } else {
       markLessonComplete(programSlug, lessonSlug);

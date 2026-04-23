@@ -22,7 +22,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json()) as ChatRequest;
+  let body: ChatRequest;
+  try {
+    body = (await req.json()) as ChatRequest;
+  } catch {
+    return new Response("Invalid JSON", { status: 400 });
+  }
   const agent = getAgent(body.agentId);
   if (!agent) {
     return new Response(`Unknown agent: ${body.agentId}`, { status: 404 });
