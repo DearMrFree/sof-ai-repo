@@ -12,6 +12,9 @@ const nextConfig = {
       { source: "/mistral", destination: "/schools/mistral" },
       { source: "/llama", destination: "/schools/llama" },
       { source: "/grok", destination: "/schools/grok" },
+      // School of AI Fluency — claude hosts, but the curriculum is open
+      // and the school has its own identity, so it gets a top-level URL.
+      { source: "/fluency", destination: "/schools/fluency" },
     ];
   },
 };
