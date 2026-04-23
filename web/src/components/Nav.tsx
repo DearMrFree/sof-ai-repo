@@ -33,11 +33,18 @@ export function Nav() {
           </Link>
 
           <div className="hidden items-center gap-0.5 md:flex">
-            {navLinks.map((l) => {
+            {(() => {
+              const matches = navLinks.filter(
+                (link) =>
+                  pathname === link.href ||
+                  (link.href !== "/" && pathname?.startsWith(link.href + "/")),
+              );
+              const bestHref = matches.length
+                ? matches.reduce((a, b) => (a.href.length >= b.href.length ? a : b)).href
+                : null;
+              return navLinks.map((l) => {
               const Icon = l.icon;
-              const active =
-                pathname === l.href ||
-                (l.href !== "/" && pathname?.startsWith(l.href));
+              const active = l.href === bestHref;
               return (
                 <Link
                   key={l.href}
@@ -60,7 +67,8 @@ export function Nav() {
                   />
                 </Link>
               );
-            })}
+            });
+            })()}
           </div>
         </div>
 
