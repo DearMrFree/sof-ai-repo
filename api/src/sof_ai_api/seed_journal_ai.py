@@ -13,6 +13,8 @@ in a real PR in the sof.ai GitHub repo, so the paper is traceable end-to-end.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlmodel import Session, select
 
 from .ledger import apply_earn_rule
@@ -343,20 +345,14 @@ def _first_article_exists(session: Session) -> JournalArticle | None:
     ).first()
 
 
-def seed(session: Session) -> dict[str, object]:
-    """Seed Journal AI + its first article + reviews + a v1n1 issue.
-
-    Returns a summary dict useful for logging / API responses. Every step
-    is idempotent — a second call is a cheap no-op.
-    """
-
-    # 1) Journal
+def _ensure_journal(session: Session) -> bool:
     j = session.exec(
         select(Journal).where(Journal.slug == JOURNAL_SLUG)
     ).first()
-    journal_created = False
-    if not j:
-        j = Journal(
+    if j:
+        return False
+    session.add(
+        Journal(
             slug=JOURNAL_SLUG,
             title="Journal AI",
             description=(
@@ -369,108 +365,119 @@ def seed(session: Session) -> dict[str, object]:
             editor_in_chief_type=EIC_TYPE,
             editor_in_chief_id=EIC_ID,
         )
-        session.add(j)
-        apply_earn_rule(
-            session,
-            EIC_TYPE,
-            EIC_ID,
-            "found_journal",
-            correlation_id=f"journal:{JOURNAL_SLUG}",
-        )
-        session.flush()
-        journal_created = True
+    )
+    apply_earn_rule(
+        session,
+        EIC_TYPE,
+        EIC_ID,
+        "found_journal",
+        correlation_id=f"journal:{JOURNAL_SLUG}",
+    )
+    session.flush()
+    return True
 
-    # 2) Founding article
-    article = _first_article_exists(session)
-    article_created = False
-    if not article:
-        article = JournalArticle(
-            journal_slug=JOURNAL_SLUG,
-            title=ARTICLE_TITLE,
-            abstract=ABSTRACT,
-            body=REVISIONS[-1][3],  # latest revision body
-            submitter_type=EIC_TYPE,
-            submitter_id=EIC_ID,
-            # Comma-separated co-authors. Agents are first-class on sof.ai.
-            coauthors="agent:devin",
-            status="under_review",
-        )
-        session.add(article)
-        session.flush()
-        apply_earn_rule(
-            session,
-            EIC_TYPE,
-            EIC_ID,
-            "article_submitted",
-            correlation_id=f"article:{JOURNAL_SLUG}:{article.id}",
-        )
-        article_created = True
 
-    # 3) Revisions
-    revisions_created = 0
-    if article.id is not None:
-        existing_revs = session.exec(
-            select(JournalArticleRevision).where(
-                JournalArticleRevision.article_id == article.id
+def _ensure_article(session: Session) -> tuple[JournalArticle, bool]:
+    existing = _first_article_exists(session)
+    if existing:
+        return existing, False
+    article = JournalArticle(
+        journal_slug=JOURNAL_SLUG,
+        title=ARTICLE_TITLE,
+        abstract=ABSTRACT,
+        body=REVISIONS[-1][3],  # latest revision body
+        submitter_type=EIC_TYPE,
+        submitter_id=EIC_ID,
+        # Comma-separated co-authors. Agents are first-class on sof.ai.
+        coauthors="agent:devin",
+        status="under_review",
+    )
+    session.add(article)
+    session.flush()
+    apply_earn_rule(
+        session,
+        EIC_TYPE,
+        EIC_ID,
+        "article_submitted",
+        correlation_id=f"article:{JOURNAL_SLUG}:{article.id}",
+    )
+    return article, True
+
+
+def _ensure_revisions(session: Session, article: JournalArticle) -> int:
+    if article.id is None:
+        return 0
+    existing_revs = session.exec(
+        select(JournalArticleRevision).where(
+            JournalArticleRevision.article_id == article.id
+        )
+    ).all()
+    existing_nos = {r.revision_no for r in existing_revs}
+    created = 0
+    for i, (rev_type, rev_id, changelog, body) in enumerate(
+        REVISIONS, start=1
+    ):
+        if i in existing_nos:
+            continue
+        session.add(
+            JournalArticleRevision(
+                article_id=article.id,
+                revision_no=i,
+                revised_by_type=rev_type,
+                revised_by_id=rev_id,
+                changelog=changelog,
+                body=body,
             )
-        ).all()
-        existing_nos = {r.revision_no for r in existing_revs}
-        for i, (rev_type, rev_id, changelog, body) in enumerate(
-            REVISIONS, start=1
+        )
+        created += 1
+    return created
+
+
+def _ensure_reviews(session: Session, article: JournalArticle) -> int:
+    """Seed one peer review per reviewer, idempotent on
+    (article_id, reviewer_type, reviewer_id)."""
+    if article.id is None:
+        return 0
+    created = 0
+    for rev_type, rev_id, rec, comments in PEER_REVIEWS:
+        # Don't pay the author to review their own paper.
+        if (
+            rev_type == article.submitter_type
+            and rev_id == article.submitter_id
         ):
-            if i in existing_nos:
-                continue
-            session.add(
-                JournalArticleRevision(
-                    article_id=article.id,
-                    revision_no=i,
-                    revised_by_type=rev_type,
-                    revised_by_id=rev_id,
-                    changelog=changelog,
-                    body=body,
-                )
+            continue
+        existing = session.exec(
+            select(JournalPeerReview).where(
+                JournalPeerReview.article_id == article.id,
+                JournalPeerReview.reviewer_type == rev_type,
+                JournalPeerReview.reviewer_id == rev_id,
             )
-            revisions_created += 1
+        ).first()
+        if existing:
+            continue
+        session.add(
+            JournalPeerReview(
+                article_id=article.id,
+                reviewer_type=rev_type,
+                reviewer_id=rev_id,
+                recommendation=rec,
+                comments=comments,
+            )
+        )
+        apply_earn_rule(
+            session,
+            rev_type,
+            rev_id,
+            "peer_review",
+            correlation_id=f"review:{article.id}:{rev_type}:{rev_id}",
+        )
+        created += 1
+    return created
 
-    # 4) Peer reviews — one per reviewer, idempotent on
-    # (article_id, reviewer_type, reviewer_id).
-    reviews_created = 0
-    if article.id is not None:
-        for rev_type, rev_id, rec, comments in PEER_REVIEWS:
-            # Don't pay the author to review their own paper.
-            if rev_type == article.submitter_type and rev_id == article.submitter_id:
-                continue
-            existing = session.exec(
-                select(JournalPeerReview).where(
-                    JournalPeerReview.article_id == article.id,
-                    JournalPeerReview.reviewer_type == rev_type,
-                    JournalPeerReview.reviewer_id == rev_id,
-                )
-            ).first()
-            if existing:
-                continue
-            session.add(
-                JournalPeerReview(
-                    article_id=article.id,
-                    reviewer_type=rev_type,
-                    reviewer_id=rev_id,
-                    recommendation=rec,
-                    comments=comments,
-                )
-            )
-            apply_earn_rule(
-                session,
-                rev_type,
-                rev_id,
-                "peer_review",
-                correlation_id=(
-                    f"review:{article.id}:{rev_type}:{rev_id}"
-                ),
-            )
-            reviews_created += 1
 
-    # 5) Volume 1 Issue 1 — published, with the founding article flipped to
-    # "published".
+def _ensure_inaugural_issue(
+    session: Session, article: JournalArticle
+) -> bool:
     issue = session.exec(
         select(JournalIssue).where(
             JournalIssue.journal_slug == JOURNAL_SLUG,
@@ -478,46 +485,55 @@ def seed(session: Session) -> dict[str, object]:
             JournalIssue.number == 1,
         )
     ).first()
-    issue_created = False
-    if not issue:
-        issue = JournalIssue(
-            journal_slug=JOURNAL_SLUG,
-            volume=1,
-            number=1,
-            title="Inaugural issue — the autonomous classroom",
-            description=(
-                "Volume 1 Issue 1 of Journal AI. Ships the founding paper "
-                "co-authored by Dr. Freedom Cheteni and Devin, with a peer "
-                "cohort of humans and agents from the sof.ai reviewer pool."
-            ),
-        )
-        session.add(issue)
-        session.flush()
-        if article.id is not None and article.status != "published":
-            from datetime import UTC, datetime as _dt
-
-            article.status = "published"
-            article.published_issue_id = issue.id
-            article.published_at = _dt.now(UTC)
-            session.add(article)
-            apply_earn_rule(
-                session,
-                article.submitter_type,
-                article.submitter_id,
-                "article_published",
-                correlation_id=f"article_published:{article.id}",
-            )
+    if issue:
+        return False
+    issue = JournalIssue(
+        journal_slug=JOURNAL_SLUG,
+        volume=1,
+        number=1,
+        title="Inaugural issue — the autonomous classroom",
+        description=(
+            "Volume 1 Issue 1 of Journal AI. Ships the founding paper "
+            "co-authored by Dr. Freedom Cheteni and Devin, with a peer "
+            "cohort of humans and agents from the sof.ai reviewer pool."
+        ),
+    )
+    session.add(issue)
+    session.flush()
+    if article.id is not None and article.status != "published":
+        article.status = "published"
+        article.published_issue_id = issue.id
+        article.published_at = datetime.now(UTC)
+        session.add(article)
         apply_earn_rule(
             session,
-            EIC_TYPE,
-            EIC_ID,
-            "issue_published",
-            correlation_id=f"issue:{JOURNAL_SLUG}:1:1",
+            article.submitter_type,
+            article.submitter_id,
+            "article_published",
+            correlation_id=f"article_published:{article.id}",
         )
-        issue_created = True
+    apply_earn_rule(
+        session,
+        EIC_TYPE,
+        EIC_ID,
+        "issue_published",
+        correlation_id=f"issue:{JOURNAL_SLUG}:1:1",
+    )
+    return True
 
+
+def seed(session: Session) -> dict[str, object]:
+    """Seed Journal AI + its first article + reviews + a v1n1 issue.
+
+    Returns a summary dict useful for logging / API responses. Every step
+    is idempotent — a second call is a cheap no-op.
+    """
+    journal_created = _ensure_journal(session)
+    article, article_created = _ensure_article(session)
+    revisions_created = _ensure_revisions(session, article)
+    reviews_created = _ensure_reviews(session, article)
+    issue_created = _ensure_inaugural_issue(session, article)
     session.commit()
-
     return {
         "journal_slug": JOURNAL_SLUG,
         "article_id": article.id,

@@ -2,8 +2,17 @@
 
 from fastapi.testclient import TestClient
 
-from sof_ai_api.db import init_db
+from sof_ai_api.db import get_session, init_db
 from sof_ai_api.main import app
+from sof_ai_api.seed_journal_ai import (
+    ARTICLE_TITLE,
+    JOURNAL_SLUG,
+    PEER_REVIEWS,
+    REVISIONS,
+)
+from sof_ai_api.seed_journal_ai import (
+    seed as seed_journal_ai,
+)
 
 init_db()
 client = TestClient(app)
@@ -178,18 +187,9 @@ def test_seed_journal_ai_is_idempotent_and_creates_founding_article() -> None:
     reviews, and volume 1 issue 1 on first run — and be a cheap no-op on
     subsequent runs. This is the lifespan-startup hook that plants the
     flagship journal on every cold boot."""
-    from sof_ai_api.db import get_session
-    from sof_ai_api.seed_journal_ai import (
-        ARTICLE_TITLE,
-        JOURNAL_SLUG,
-        PEER_REVIEWS,
-        REVISIONS,
-        seed,
-    )
-
     # Fresh run should create everything.
     s1 = next(get_session())
-    first = seed(s1)
+    first = seed_journal_ai(s1)
     s1.close()
     assert first["journal_slug"] == JOURNAL_SLUG
     # Could be created=True if first time, or False if prior tests triggered
@@ -198,7 +198,7 @@ def test_seed_journal_ai_is_idempotent_and_creates_founding_article() -> None:
 
     # Second run is a no-op.
     s2 = next(get_session())
-    second = seed(s2)
+    second = seed_journal_ai(s2)
     s2.close()
     assert second["journal_created"] is False
     assert second["article_created"] is False
