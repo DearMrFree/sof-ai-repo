@@ -11,6 +11,11 @@ primary_region = "iad"
 [env]
   # Bind to the port Fly proxies to by default.
   PORT = "8000"
+  # Pin SQLite to the persistent volume mounted at /data (see [[mounts]]).
+  # Keeping this in [env] rather than fly secrets means a fresh repo-driven
+  # deploy can't silently fall back to the default sqlite:///./sof_ai.db and
+  # write to the ephemeral container FS.
+  DATABASE_URL = "sqlite:////data/sof_ai.db"
 
 [http_service]
   internal_port = 8000
