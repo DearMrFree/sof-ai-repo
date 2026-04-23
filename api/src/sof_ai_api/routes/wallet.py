@@ -23,7 +23,7 @@ from sqlmodel import Session, select
 from ..db import get_session
 from ..ledger import (
     EARN_RULES,
-    InsufficientFunds,
+    InsufficientFundsError,
     LedgerError,
     get_or_create_wallet,
     transfer,
@@ -201,7 +201,7 @@ def transfer_edu(
             body.amount,
             memo=body.memo,
         )
-    except InsufficientFunds as exc:
+    except InsufficientFundsError as exc:
         session.rollback()
         raise HTTPException(status_code=402, detail=str(exc)) from exc
     except LedgerError as exc:

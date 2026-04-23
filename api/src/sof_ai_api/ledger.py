@@ -18,7 +18,7 @@ Educoin® is a registered service mark of InventXR LLC (USPTO Reg. No.
    re-run progress hooks safely.
 
 4. **No negative balances on debit.** Debits that would overdraw raise
-   `InsufficientFunds`; callers must surface a 402 to the API layer.
+   `InsufficientFundsError`; callers must surface a 402 to the API layer.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from sqlmodel import Session, select
 from .models import EducoinTransaction, Wallet, _utcnow
 
 
-class InsufficientFunds(Exception):
+class InsufficientFundsError(Exception):
     """Raised when a debit or transfer would overdraw the wallet."""
 
 
@@ -165,7 +165,7 @@ def debit(
     memo: str = "",
     correlation_id: Optional[str] = None,
 ) -> EducoinTransaction:
-    """Debit a wallet. Raises InsufficientFunds if it would overdraw.
+    """Debit a wallet. Raises InsufficientFundsError if it would overdraw.
 
     `amount` must be positive; the stored transaction has a negative sign
     so sum-of-amounts equals the balance.
@@ -177,7 +177,7 @@ def debit(
 
     wallet = get_or_create_wallet(session, owner_type, owner_id)
     if wallet.balance < amount:
-        raise InsufficientFunds(
+        raise InsufficientFundsError(
             f"balance {wallet.balance} < requested {amount}"
         )
     wallet.balance -= amount
@@ -221,7 +221,7 @@ def transfer(
     sender = get_or_create_wallet(session, sender_type, sender_id)
     recipient = get_or_create_wallet(session, recipient_type, recipient_id)
     if sender.balance < amount:
-        raise InsufficientFunds(
+        raise InsufficientFundsError(
             f"balance {sender.balance} < requested {amount}"
         )
 

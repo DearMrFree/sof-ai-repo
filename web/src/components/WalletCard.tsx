@@ -82,7 +82,7 @@ export function WalletCard({
       </div>
 
       <p className="mt-1 text-[11px] text-zinc-500">
-        {displayName}'s ledger · learn, teach, contribute — earn EDU.
+        {displayName}&rsquo;s ledger · learn, teach, contribute — earn EDU.
       </p>
 
       <div className="relative mt-4 flex items-baseline gap-2">
