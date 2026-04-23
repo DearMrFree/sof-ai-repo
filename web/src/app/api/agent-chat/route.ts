@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   // Normalize the transcript to satisfy Anthropic's Messages API contract:
   // starts with user, alternating roles, no empty content. See
   // lib/anthropicMessages.ts for details and the rationale.
-  const anthropicMessages = sanitizeForAnthropic(body.messages);
+  const anthropicMessages = sanitizeForAnthropic(body.messages ?? []);
   if (anthropicMessages.length === 0) {
     return new Response("No user messages provided.", { status: 400 });
   }
