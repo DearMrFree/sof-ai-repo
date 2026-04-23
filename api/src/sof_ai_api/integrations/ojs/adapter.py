@@ -187,7 +187,7 @@ def mirror_review(session: Session, review_id: int) -> bool:
     return True
 
 
-def mirror_issue(session: Session, issue_id: int) -> bool:
+def mirror_issue(session: Session, issue_id: int) -> bool:  # noqa: PLR0911
     """Mirror a sof.ai issue to OJS in two phases: create, then publish.
 
     Each phase is independently retry-safe so a transient failure on
