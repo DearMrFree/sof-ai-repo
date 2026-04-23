@@ -2,7 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 
-import { displayNameFromEmail, generatePersona, handleFromEmail } from "./personaGen";
+import { displayNameFromEmail, generatePersona } from "./personaGen";
 
 const hasGoogle =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
@@ -54,12 +54,16 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email", placeholder: "you@sof.ai" },
       },
       async authorize(credentials) {
-        const email = credentials?.email?.trim();
+        const email = credentials?.email?.trim().toLowerCase();
         if (!email || !email.includes("@")) return null;
-        const handle = handleFromEmail(email);
         const name = displayNameFromEmail(email);
         return {
-          id: `email:${handle}`,
+          // Use the full normalized email as the stable identity. The
+          // display handle is separately derived via handleFromEmail for
+          // profile URLs; it intentionally discards the domain and is
+          // not unique across domains, so it must not be used as an
+          // account key.
+          id: `email:${email}`,
           email,
           name,
           image: null,
