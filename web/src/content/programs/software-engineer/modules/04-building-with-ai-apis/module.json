@@ -1,0 +1,4 @@
+{
+  "title": "Building with AI APIs",
+  "summary": "Wiring a real LLM into your own software — the request shape, streaming, tool use, cost and error handling, and the shape of a production AI endpoint."
+}

@@ -1,0 +1,78 @@
+---
+title: "The new inner loop"
+summary: "Write → run → debug is now write → delegate → review. What changes when an agent types alongside you."
+estimatedMinutes: 12
+---
+
+## The old inner loop
+
+For decades the inner loop of a working programmer looked like this:
+
+1. **Write** a few lines of code.
+2. **Run** them.
+3. **Debug** what comes back.
+4. **Repeat.**
+
+Your attention stayed inside a small window: the function, the test, the
+stack trace. You were the only thing typing.
+
+## The new inner loop
+
+With a capable AI pair, the loop changes shape:
+
+1. **Describe** what you want — in words, in a failing test, in a spec.
+2. **Delegate** part of the work — type the boilerplate, refactor the tests,
+   add the error handling, write the migration.
+3. **Review** the proposed change as if it came from a colleague.
+4. **Run** it, **iterate**, **repeat.**
+
+The job has shifted. Less typing. More *deciding*. More *reading*.
+
+## Three tools, three jobs
+
+You'll meet three distinct AI pair-programming tools in this module. Their
+shapes are deliberately different:
+
+- **A terminal-native agent (e.g. Claude Code)** — sits next to your shell,
+  can read files, run commands, and propose edits. Best for: quick, local,
+  context-aware tasks. "Rename this variable everywhere. Add a test for
+  this edge case. Explain what this function does."
+- **A remote autonomous engineer (e.g. Devin)** — spins up its own
+  environment, clones the repo, and opens a real PR. Best for: longer,
+  self-contained tasks that you want to happen *while you do something
+  else*. "Migrate our logging to structlog. Open a PR. I'll review
+  tomorrow."
+- **Subagents** — lightweight specialists you spin up *from inside* a
+  larger agent task. A researcher, a writer, a critic. Best for:
+  decomposing a single bigger task into distinct roles.
+
+Confusing them is the fastest way to misuse them. A terminal agent is the
+wrong tool for a 2-day refactor; a remote engineer is overkill for
+"rename this variable." One of your jobs this module is learning to
+match the shape of the work to the shape of the tool.
+
+## The meta-skill
+
+The meta-skill underneath all of this is one word: **delegation.**
+
+Delegation is not typing less. Delegation is deciding what *only you* can
+decide, and handing off what someone else can do given a clear enough
+description.
+
+In traditional software engineering, delegation was limited by headcount
+and coordination cost. With AI pairs, the coordination cost drops to
+seconds. The limiter is now *your ability to describe the work clearly.*
+
+That's what we're going to practice for the next four lessons.
+
+## Check yourself
+
+- What's the last code change you made where you did *all* the typing?
+  Would any of that work have been faster to describe than to type?
+- What's the last task you avoided because it was "too tedious"? Could
+  you describe it in a paragraph?
+- What's the last PR you reviewed? Did you read it with the same rigor
+  you'd read an agent's PR? (You should.)
+
+Next lesson: getting your keyboard-level agent set up and learning the
+shape of its work.

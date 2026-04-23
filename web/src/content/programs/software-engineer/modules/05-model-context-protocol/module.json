@@ -1,0 +1,4 @@
+{
+  "title": "Model Context Protocol",
+  "summary": "The open protocol that lets any agent discover and call any tool. How MCP servers work, how to write one, and how to plug it into your own code."
+}

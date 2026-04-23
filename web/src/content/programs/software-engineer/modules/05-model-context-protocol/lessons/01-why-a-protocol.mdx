@@ -1,0 +1,87 @@
+---
+title: "Why a protocol?"
+summary: "Every agent calling every tool in a custom way doesn't scale. MCP solves the N×M problem."
+estimatedMinutes: 10
+---
+
+## The N × M problem
+
+You have N agents (Claude, Devin, your own prototype, a coworker's
+side-project agent). You have M tools (GitHub, Slack, your internal
+APIs, a vector DB, a weather service).
+
+If every agent integrates with every tool directly, you have N × M
+custom integrations. Every new agent has to re-wire every tool. Every
+new tool has to re-wire every agent. Nobody ends up using anything
+outside their own walled garden.
+
+This is the same problem USB solved in 1996, and TCP solved in 1982,
+and JSON solved for data interchange. The solution is always the
+same: **a protocol in the middle.**
+
+## Enter Model Context Protocol
+
+**Model Context Protocol (MCP)** is an open protocol for connecting
+agents to tools. The shape is simple:
+
+- Any program can act as an **MCP server** — it exposes a list of
+  tools (name, description, input schema) and responds to
+  `tools/call` requests.
+- Any agent can act as an **MCP client** — it discovers the tools on
+  one or more servers and calls them on the user's behalf.
+
+Because the protocol is standard, the N × M problem collapses to
+N + M. Write one MCP server for your internal API, and every
+MCP-speaking agent can use it immediately.
+
+## What an MCP server actually does
+
+An MCP server exposes three kinds of capabilities:
+
+### Tools
+
+Functions the agent can call. Each tool has a name, a description,
+and a JSON Schema for its arguments. When the agent decides to call
+one, the server runs it and returns a result.
+
+### Resources
+
+Readable things the agent can look up — files, database rows, API
+responses. The agent gets a list of URIs and can ask the server to
+read any of them.
+
+### Prompts
+
+Reusable prompt templates the server offers. "Summarize this PR."
+"Explain this codebase to a new hire." The server defines them, the
+agent (or user) picks one.
+
+Most MCP servers in the wild focus on **tools** — they're the most
+powerful and the easiest to understand. We'll spend most of this
+module there.
+
+## The transport
+
+MCP runs over one of two transports:
+
+- **stdio** — server is a local process, client pipes JSON-RPC over
+  stdin/stdout. Great for local tools (your shell, your git repo,
+  your filesystem).
+- **HTTP + SSE** — server is a web service, client connects over
+  HTTP with Server-Sent Events for responses. Great for shared/remote
+  tools.
+
+You'll use both. Local code-running agent? stdio. Shared team tool?
+HTTP.
+
+## Why this matters for you
+
+You're going to write an MCP server in the next lesson. Once you do,
+*every* MCP-speaking agent on your machine will have access to
+whatever your server exposes — without any additional integration
+work on either side.
+
+This is a bigger shift than it sounds. We're moving from "my AI chat
+can do X" to "every AI I use can do X."
+
+Next lesson: building your first MCP server, from zero.

@@ -1,0 +1,172 @@
+---
+title: "MCP beyond tools: resources, prompts, and composition"
+summary: "The rest of the protocol. How to expose data (not just actions), ship prompt templates, and stitch multiple servers together."
+estimatedMinutes: 14
+---
+
+## Tools are the start, not the end
+
+Most of the MCP servers you'll read about expose only tools. That's
+because tools are the most visible capability — the agent does
+something, the user sees a result.
+
+But the protocol has two more capabilities that often matter more in
+real deployments.
+
+## Resources — making data readable
+
+A **resource** is something the agent can read on demand. Think
+read-only, URI-addressable data.
+
+Examples:
+
+- `file:///home/me/notes/2025-01-15.md` — a specific note.
+- `postgres://db/customers/12345` — a specific row.
+- `github://owner/repo/issues/42` — an issue.
+
+When a client connects, the server can list resources it knows
+about. When the agent wants to know something, it asks the server
+for a specific URI.
+
+```python
+@server.list_resources()
+async def list_resources():
+    return [
+        Resource(
+            uri=f"note:///{p.name}",
+            name=p.name,
+            mimeType="text/markdown",
+        )
+        for p in Path("/home/me/notes").glob("*.md")
+    ]
+
+@server.read_resource()
+async def read_resource(uri: str):
+    name = uri.removeprefix("note:///")
+    return (Path("/home/me/notes") / name).read_text()
+```
+
+Why not just expose this as a tool? Because:
+
+- Resources are **paginatable and enumerable** — the client can show
+  the user "here are the 412 notes your agent has access to."
+- Resources are **cacheable** — same URI = same content.
+- Resources are **composable** — the client UI can offer to include
+  a resource in the conversation context, without the model having
+  to ask for it as a tool call.
+
+## Prompts — shipping reusable templates
+
+A **prompt** is a named, parameterized template the server offers to
+the client. The user picks one; the server returns a pre-filled
+message or sequence of messages.
+
+```python
+@server.list_prompts()
+async def list_prompts():
+    return [
+        Prompt(
+            name="review_pr",
+            description="Review a PR the way a senior reviewer would.",
+            arguments=[
+                PromptArgument(name="pr_url", required=True),
+            ],
+        ),
+    ]
+
+@server.get_prompt()
+async def get_prompt(name, arguments):
+    if name == "review_pr":
+        pr_url = arguments["pr_url"]
+        diff = await fetch_pr_diff(pr_url)
+        return GetPromptResult(
+            messages=[{
+                "role": "user",
+                "content": {
+                    "type": "text",
+                    "text": f"Review this PR, emphasis on correctness, "
+                            f"readability, and risk. Diff:\n\n{diff}",
+                },
+            }],
+        )
+```
+
+Prompts are how you **ship your team's best practices**: "Always
+review PRs this way." "Always write commit messages like this." The
+user picks a prompt from a menu and the server does the rest.
+
+## Composing multiple servers
+
+Real deployments compose several MCP servers at once:
+
+```json
+{
+  "mcpServers": {
+    "github": { "command": "mcp-github",  "env": {"GITHUB_TOKEN": "..."} },
+    "postgres": { "command": "mcp-postgres", "env": {"DATABASE_URL": "..."} },
+    "filesystem": { "command": "mcp-fs", "args": ["/home/me/work"] }
+  }
+}
+```
+
+The client merges all their tools into one namespace — now the agent
+can *search GitHub, query Postgres, and read local files in the same
+conversation.*
+
+Watch for two gotchas:
+
+- **Tool name collisions.** Two servers may both export a tool
+  called `search`. Clients disambiguate by prefixing, but that
+  makes for noisy tool descriptions. Name your tools specifically.
+- **Permission blast radius.** Giving the agent a tool that edits
+  files AND a tool that runs shell commands AND a tool that pushes
+  to GitHub is a meaningful escalation. Layer auth and confirmation.
+
+## Streaming long-running tools
+
+Long-running tools (a build, a test run, a deployment) should stream
+progress back to the client, not return a single blob at the end.
+MCP supports this through the progress token mechanism:
+
+```python
+@server.call_tool()
+async def call_tool(name, arguments, progress_token=None):
+    if name == "run_tests":
+        async for line in stream_test_output():
+            if progress_token:
+                await server.send_progress(
+                    progress_token,
+                    progress=line,
+                )
+        return [TextContent(type="text", text="done")]
+```
+
+The user watches progress in real time. If they cancel, the client
+tells your server to stop. You stop.
+
+## Putting it together
+
+You now have all the parts of a production-shape MCP server:
+
+- **Tools** for actions.
+- **Resources** for data.
+- **Prompts** for reusable templates.
+- **Streaming** for long tasks.
+- **Composition** with other servers for real workflows.
+
+## Module capstone
+
+Take the MCP server you built last lesson and deepen it:
+
+1. Add at least **one resource** your agent can read (not just call).
+2. Add at least **one prompt template** encoding a workflow you
+   repeat.
+3. Use it from a real client (Claude Desktop, or a local agent
+   you've built).
+
+Optional stretch: compose your server with another community MCP
+server (filesystem, GitHub, search). Notice what the agent can now
+do that it couldn't before.
+
+Next — and final — lesson of the program: the capstone. You're going
+to ship a real PR, from your own spec, with Devin as your pair.
