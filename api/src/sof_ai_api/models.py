@@ -65,6 +65,7 @@ class Challenge(SQLModel, table=True):
     body: str
     tag: str = Field(index=True)  # "confusing" | "broken" | "missing" | "question" | "idea"
     page_url: Optional[str] = None
+    program_slug: Optional[str] = Field(default=None, index=True)
     lesson_slug: Optional[str] = Field(default=None, index=True)
     status: str = Field(default="new", index=True)  # new | triaged | building | shipped
     created_at: datetime = Field(default_factory=_utcnow)

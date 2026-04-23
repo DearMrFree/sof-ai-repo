@@ -48,6 +48,14 @@ export function ChallengeButton() {
       return;
     }
     setSubmitting(true);
+    // Extract program + lesson from pathnames shaped like
+    // /learn/<program>/<lesson>. Program overview pages (/learn/<program>)
+    // only yield a program_slug. Pathnames outside /learn yield neither.
+    const learnMatch = pathname?.match(
+      /^\/learn\/([^/]+)(?:\/([^/]+))?\/?$/,
+    );
+    const programSlug = learnMatch?.[1] ?? null;
+    const lessonSlug = learnMatch?.[2] ?? null;
     try {
       const res = await fetch("/api/challenges", {
         method: "POST",
@@ -56,9 +64,8 @@ export function ChallengeButton() {
           body: trimmed,
           tag,
           page_url: typeof window !== "undefined" ? window.location.href : null,
-          lesson_slug: pathname?.startsWith("/learn/")
-            ? pathname.split("/").pop() ?? null
-            : null,
+          program_slug: programSlug,
+          lesson_slug: lessonSlug,
         }),
       });
       if (!res.ok) {
