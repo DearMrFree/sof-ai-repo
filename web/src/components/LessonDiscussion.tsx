@@ -116,7 +116,7 @@ export function LessonDiscussion({
             when: "now",
           },
         ];
-        persist(running);
+        setPosts(running);
         try {
           const res = await fetch("/api/agent-chat", {
             method: "POST",
