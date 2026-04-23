@@ -6,6 +6,7 @@ import { LessonSidebar } from "@/components/LessonSidebar";
 import { TutorChat } from "@/components/TutorChat";
 import { LessonFooter } from "@/components/LessonFooter";
 import { DevinCapstone } from "@/components/DevinCapstone";
+import { LessonDiscussion } from "@/components/LessonDiscussion";
 import {
   findAdjacentLessons,
   flattenLessons,
@@ -93,6 +94,11 @@ export default function LessonPage({
                 capstone={lesson.devinCapstone}
               />
             )}
+
+            <LessonDiscussion
+              programSlug={program.slug}
+              lessonSlug={lesson.slug}
+            />
 
             <LessonFooter
               programSlug={program.slug}

@@ -1,10 +1,24 @@
 import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { getAllPrograms } from "@/lib/content";
-import { ArrowRight, Brain, Code2, Rocket, Sparkles, Bot, GraduationCap } from "lucide-react";
+import { AGENTS, getOnlineAgents } from "@/lib/agents";
+import { AgentAvatar } from "@/components/AgentAvatar";
+import {
+  ArrowRight,
+  Brain,
+  Code2,
+  Rocket,
+  Sparkles,
+  Bot,
+  GraduationCap,
+  Users,
+  Megaphone,
+  Zap,
+} from "lucide-react";
 
 export default function HomePage() {
   const programs = getAllPrograms();
+  const online = getOnlineAgents();
 
   return (
     <>
@@ -12,11 +26,12 @@ export default function HomePage() {
       <main>
         {/* Hero */}
         <section className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.15),transparent_60%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.18),transparent_60%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,rgba(236,72,153,0.1),transparent_60%)]" />
           <div className="relative mx-auto max-w-6xl px-4 pb-24 pt-20 text-center">
             <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-300">
               <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
-              The most AI-enabled LMS on the planet
+              The classroom of the future is open
             </div>
             <h1 className="mx-auto max-w-4xl text-5xl font-bold tracking-tight text-white sm:text-6xl md:text-7xl">
               Learn anything.
@@ -28,23 +43,56 @@ export default function HomePage() {
               </span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-lg text-zinc-400">
-              sof.ai is the School of AI. Every lesson has an AI tutor. Every
-              assessment is AI-graded. And our flagship <strong className="text-white">Software Engineer</strong> program is fully powered by Devin — you don&apos;t just read about engineering, you ship PRs with a real autonomous engineer.
+              sof.ai is the School of AI — an LMS where humans and agents learn
+              together. Your classmates are <strong className="text-white">Devin</strong>,{" "}
+              <strong className="text-white">Claude</strong>,{" "}
+              <strong className="text-white">Gemini</strong>,{" "}
+              <strong className="text-white">GPT-5</strong> and more. They
+              tutor, grade, pair-program, and ship PRs alongside you.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
-                href="/learn"
+                href="/classroom"
                 className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400"
               >
-                Start learning
+                Enter the classroom
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <a
-                href="#programs"
+              <Link
+                href="/learn"
                 className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-5 py-3 text-sm text-zinc-300 transition hover:bg-zinc-800"
               >
                 Browse programs
-              </a>
+              </Link>
+            </div>
+
+            {/* Live agents strip */}
+            <div className="mx-auto mt-14 max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 backdrop-blur">
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex h-full w-full rounded-full bg-emerald-400" />
+                  </span>
+                  <p className="text-xs font-medium text-zinc-200">
+                    {online.length} agents online
+                  </p>
+                  <span className="text-xs text-zinc-500">
+                    ready to learn with you
+                  </span>
+                </div>
+                <div className="flex -space-x-2">
+                  {online.map((a) => (
+                    <Link
+                      key={a.id}
+                      href={`/classroom/agents/${a.id}`}
+                      title={a.name}
+                    >
+                      <AgentAvatar agent={a} size="sm" showStatus />
+                    </Link>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -55,17 +103,99 @@ export default function HomePage() {
             <Pillar
               icon={<Brain className="h-5 w-5" />}
               title="Learn anything"
-              body="An AI tutor in every lesson that knows exactly what you're stuck on. Personalized pacing. Adaptive quizzes that grow with you."
+              body="An AI tutor in every lesson that knows exactly what you're stuck on. Multiple agent personas, each with their own teaching style."
             />
             <Pillar
               icon={<Code2 className="h-5 w-5" />}
               title="Train anything"
-              body="In-browser code sandboxes, notebooks, and simulators. Practice the thing you just read — without leaving the page."
+              body="Multi-agent study rooms, in-browser sandboxes, AI-graded assignments. Practice with Claude, debug with Gemini, review with Grok."
             />
             <Pillar
               icon={<Rocket className="h-5 w-5" />}
               title="Build anything"
-              body="Capstones where you pair with Devin — a real autonomous engineer — to ship real software. PRs, reviews, deploys."
+              body="Capstones where you pair with Devin — a real autonomous engineer — to ship real software. PRs, reviews, merged commits."
+            />
+          </div>
+        </section>
+
+        {/* Agent friends spotlight */}
+        <section className="mx-auto max-w-6xl px-4 pb-20">
+          <div className="mb-8 text-center">
+            <p className="text-xs uppercase tracking-wider text-indigo-400">
+              Your classmates
+            </p>
+            <h2 className="mt-1 text-3xl font-bold tracking-tight text-white">
+              Meet your agent friends
+            </h2>
+            <p className="mx-auto mt-2 max-w-2xl text-sm text-zinc-400">
+              Every agent has a personality, strengths, and a door that&apos;s
+              always open. Invite them into a study room, ask them a question,
+              watch them work.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+            {AGENTS.map((a) => (
+              <Link
+                key={a.id}
+                href={`/classroom/agents/${a.id}`}
+                className="group flex flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 transition hover:border-indigo-500/50"
+              >
+                <AgentAvatar agent={a} size="lg" showStatus />
+                <p className="mt-3 text-sm font-semibold text-white">
+                  {a.name}
+                </p>
+                <p className="text-[11px] text-zinc-500">{a.handle}</p>
+                <p className="mt-1 line-clamp-2 text-center text-[11px] text-zinc-400">
+                  {a.strengths[0]}
+                </p>
+              </Link>
+            ))}
+          </div>
+          <div className="mt-6 text-center">
+            <Link
+              href="/classroom/agents"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800"
+            >
+              <Bot className="h-4 w-4 text-indigo-400" />
+              Meet the whole agent lineup
+            </Link>
+          </div>
+        </section>
+
+        {/* Classroom features */}
+        <section className="mx-auto max-w-6xl px-4 pb-20">
+          <div className="mb-8">
+            <p className="text-xs uppercase tracking-wider text-indigo-400">
+              Better than Canvas
+            </p>
+            <h2 className="mt-1 text-3xl font-bold tracking-tight text-white">
+              A classroom designed for the age of agents
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Feature
+              icon={<Users className="h-4 w-4" />}
+              title="Study rooms"
+              body="Multi-agent chat rooms where humans + agents learn side-by-side."
+              href="/classroom"
+            />
+            <Feature
+              icon={<Megaphone className="h-4 w-4" />}
+              title="Activity feed"
+              body="See what your human and agent friends are shipping, in real time."
+              href="/classroom/feed"
+            />
+            <Feature
+              icon={<Zap className="h-4 w-4" />}
+              title="AI-graded assignments"
+              body="Real work, transparent rubrics, per-criterion feedback from agents."
+              href="/classroom/assignments"
+            />
+            <Feature
+              icon={<GraduationCap className="h-4 w-4" />}
+              title="Portfolio & badges"
+              body="Your proof-of-work wall — shipped PRs, completed modules, agent-awarded badges."
+              href="/classroom/portfolio"
             />
           </div>
         </section>
@@ -74,12 +204,12 @@ export default function HomePage() {
         <section id="programs" className="mx-auto max-w-6xl px-4 pb-24">
           <div className="mb-8 flex items-end justify-between">
             <div>
-              <h2 className="text-3xl font-bold tracking-tight text-white">
-                Programs
-              </h2>
-              <p className="mt-1 text-zinc-400">
-                Start with our Devin-powered Software Engineer track. More on the way.
+              <p className="text-xs uppercase tracking-wider text-indigo-400">
+                Flagship programs
               </p>
+              <h2 className="mt-1 text-3xl font-bold tracking-tight text-white">
+                Start here
+              </h2>
             </div>
             <Link
               href="/learn"
@@ -152,16 +282,7 @@ export default function HomePage() {
           >
             Curriki
           </a>
-          . Powered by{" "}
-          <a
-            href="https://devin.ai"
-            className="text-zinc-400 underline"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Devin
-          </a>
-          .
+          . Agents by Cognition, Anthropic, Google, OpenAI, Mistral, Meta, and xAI.
         </footer>
       </main>
     </>
@@ -185,5 +306,34 @@ function Pillar({
       <h3 className="text-lg font-semibold text-white">{title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-zinc-400">{body}</p>
     </div>
+  );
+}
+
+function Feature({
+  icon,
+  title,
+  body,
+  href,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group rounded-xl border border-zinc-800 bg-zinc-900/40 p-5 transition hover:border-indigo-500/50"
+    >
+      <div className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-300">
+        {icon}
+      </div>
+      <p className="text-sm font-semibold text-white">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-zinc-400">{body}</p>
+      <p className="mt-3 inline-flex items-center gap-1 text-xs text-indigo-400 opacity-0 transition group-hover:opacity-100">
+        Open
+        <ArrowRight className="h-3 w-3" />
+      </p>
+    </Link>
   );
 }
