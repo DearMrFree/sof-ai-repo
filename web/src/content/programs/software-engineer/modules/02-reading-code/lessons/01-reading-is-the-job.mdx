@@ -1,0 +1,65 @@
+---
+title: "Reading is the job"
+summary: "Why senior engineers read 10x more code than they write — and how to do it well."
+estimatedMinutes: 10
+---
+
+## The uncomfortable truth
+
+Ask any senior engineer how they spend their time and you'll hear the same
+thing: they read code *much* more than they write it. One estimate that
+circulates in the industry is **10:1** — ten lines read for every line written.
+
+That sounds wasteful until you realize what reading buys you:
+
+- You don't duplicate work that already exists.
+- You don't violate invariants the codebase depends on.
+- You can make a small change in a huge codebase without breaking everything.
+- You can review PRs (like the one you reviewed last lesson) with real rigor.
+
+## Three modes of reading
+
+Reading code isn't one thing. There are at least three different modes, and
+they call for different strategies:
+
+### 1. Orientation read
+
+"I've never seen this codebase. Where do things live?" Skim the README, the
+directory structure, the top-level config, the entrypoint file. Don't go deep
+— you're building a map, not a photograph.
+
+### 2. Diagnostic read
+
+"Something is broken. Where?" Start from the failure (a stack trace, a failing
+test, a user-visible bug) and work *backwards* through the code. Follow the
+data, not the control flow.
+
+### 3. Impact read
+
+"I want to change X. What breaks?" Start from what you want to change and
+work *outwards* — every caller, every test, every contract.
+
+Most people try to do all three at once and get overwhelmed. Decide which mode
+you're in before you open a file.
+
+## Your pair-programmer cheat code
+
+The AI tutor on the right of this page, and Devin in your capstone sessions,
+can both do one thing that's brutally useful: **summarize code at the right
+level of abstraction**. A good prompt:
+
+> "Give me a one-sentence summary of what this file does, then list the
+> public functions it exports with one-line descriptions each."
+
+Do that at the start of every orientation read and your pace will double.
+
+## Exercise
+
+Pick any open-source repo you're curious about. Spend 10 minutes doing an
+orientation read. Then ask the tutor:
+
+> "Here's the README and folder structure of {project}. What's the mental
+> model a new contributor needs?"
+
+Compare your mental model to the tutor's. Where did you disagree? Those are
+the gaps in your reading technique.

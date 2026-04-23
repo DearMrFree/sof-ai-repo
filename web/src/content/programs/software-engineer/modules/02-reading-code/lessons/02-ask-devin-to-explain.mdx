@@ -1,0 +1,51 @@
+---
+title: "Ask Devin to explain an unfamiliar repo"
+summary: "Turn a cold codebase warm in 15 minutes by pairing with Devin."
+estimatedMinutes: 20
+devinCapstone:
+  title: "Produce a repo orientation doc for a real open-source project"
+  prompt: |
+    Clone https://github.com/expressjs/express and produce a markdown document
+    called ORIENTATION.md at the repo root that:
+    1. Gives a one-paragraph summary of what Express does and who uses it.
+    2. Maps out the top-level directory structure in a tree, with one-line
+       annotations for each folder.
+    3. Lists the 5 most important files a new contributor should read first,
+       with a one-sentence rationale for each.
+    4. Calls out any "traps" — counter-intuitive things a newcomer might get
+       tripped up by.
+    Open a PR with just that file.
+  repoHint: "DearMrFree/sof-ai-scratch-express"
+  rubric:
+    - "ORIENTATION.md exists and is well-formatted."
+    - "The one-paragraph summary is accurate and specific, not generic."
+    - "Directory tree reflects the current repo, not stale structure."
+    - "'Top 5 files' choices are defensible — would a senior agree?"
+    - "At least one real 'trap' is identified (not a platitude)."
+---
+
+## The workflow
+
+Becoming productive in an unfamiliar codebase used to take a week. With Devin,
+it's a conversation. Here's the repeatable recipe:
+
+1. **Point Devin at the repo.** Either clone it locally or give Devin a link.
+2. **Ask for a map.** "Map out this repo. What are the top-level folders
+   doing?"
+3. **Ask for the hot path.** "If I want to understand how a request flows
+   through this system, which files should I read, in what order?"
+4. **Ask about the weirdness.** "What are three non-obvious things about
+   this codebase I'd miss on a first read?"
+5. **Verify.** Now actually open the files Devin pointed you at and
+   cross-check. If Devin is wrong about something, push back and ask again.
+   Devin is a collaborator, not an oracle.
+
+## The capstone
+
+Your Devin capstone below will have you produce an `ORIENTATION.md` for a real
+open-source project. This is a deliverable senior engineers actually produce
+when they join a team.
+
+> **Looking ahead:** in Module 3 you'll learn to write specs good enough that
+> Devin can implement them start-to-finish without clarifying questions.
+> Specs, not code, are the new artifact of engineering.
