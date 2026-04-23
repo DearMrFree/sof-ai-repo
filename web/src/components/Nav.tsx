@@ -43,7 +43,7 @@ export function Nav() {
                   key={l.href}
                   href={l.href}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
+                    "group relative inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
                     active
                       ? "bg-zinc-900 text-white"
                       : "text-zinc-400 hover:bg-zinc-900 hover:text-white",
@@ -51,6 +51,13 @@ export function Nav() {
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {l.label}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute inset-x-3 bottom-0 h-[2px] rounded-full bg-gradient-to-r from-indigo-400 to-fuchsia-400 transition-all",
+                      active ? "opacity-100" : "opacity-0 group-hover:opacity-40",
+                    )}
+                  />
                 </Link>
               );
             })}

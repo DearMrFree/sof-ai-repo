@@ -50,3 +50,7 @@ yarn-error.log*
 # Deploy
 fly.toml.local
 .fly/
+
+# Session artifacts (not committed)
+test-plan.md
+test-report.md

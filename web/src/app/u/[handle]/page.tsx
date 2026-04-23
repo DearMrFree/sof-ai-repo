@@ -141,28 +141,31 @@ export default function ProfilePage({
     <main className="relative mx-auto max-w-6xl px-4 pb-16">
       {/* Cover banner */}
       <section className="relative mb-6 overflow-hidden rounded-b-3xl sm:rounded-3xl sm:mt-4">
-        <div
-          aria-hidden
-          className="h-52 w-full md:h-64"
-          style={{
-            backgroundImage: `
-              radial-gradient(circle at 15% 20%, ${c1}cc, transparent 45%),
-              radial-gradient(circle at 85% 30%, ${c2}cc, transparent 55%),
-              radial-gradient(circle at 60% 80%, ${c3}b3, transparent 55%),
-              linear-gradient(135deg, #0f0f14, #18181b)
-            `,
-          }}
-        />
-        {/* noise overlay */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.12] mix-blend-overlay"
-          style={{
-            backgroundImage:
-              "radial-gradient(rgba(255,255,255,0.6) 1px, transparent 1px)",
-            backgroundSize: "3px 3px",
-          }}
-        />
+        <div className="relative h-52 w-full overflow-hidden md:h-64">
+          {/* Primary mesh — animated via CSS for a slow organic drift. */}
+          <div
+            aria-hidden
+            className="animate-sof-drift absolute -inset-[10%]"
+            style={{
+              backgroundImage: `
+                radial-gradient(circle at 15% 20%, ${c1}cc, transparent 45%),
+                radial-gradient(circle at 85% 30%, ${c2}cc, transparent 55%),
+                radial-gradient(circle at 60% 80%, ${c3}b3, transparent 55%),
+                linear-gradient(135deg, #0f0f14, #18181b)
+              `,
+            }}
+          />
+          {/* noise overlay */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[0.12] mix-blend-overlay"
+            style={{
+              backgroundImage:
+                "radial-gradient(rgba(255,255,255,0.6) 1px, transparent 1px)",
+              backgroundSize: "3px 3px",
+            }}
+          />
+        </div>
 
         {/* Avatar + primary identity */}
         <div className="absolute bottom-0 left-0 right-0 flex flex-col gap-4 p-6 sm:flex-row sm:items-end sm:justify-between">

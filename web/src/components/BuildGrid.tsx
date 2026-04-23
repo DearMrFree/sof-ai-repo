@@ -80,8 +80,14 @@ export function BuildGrid({ builds }: { builds: Build[] }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((b) => (
-            <BuildCard key={b.id} build={b} />
+          {filtered.map((b, i) => (
+            <div
+              key={b.id}
+              className="animate-sof-in"
+              style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
+            >
+              <BuildCard build={b} />
+            </div>
           ))}
         </div>
       )}

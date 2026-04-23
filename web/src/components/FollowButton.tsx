@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, UserPlus } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useToast } from "@/components/Toast";
 
 const STORAGE_KEY = "sof-ai:follows";
 
@@ -13,6 +14,7 @@ const STORAGE_KEY = "sof-ai:follows";
  */
 export function FollowButton({ handle }: { handle: string }) {
   const [following, setFollowing] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -29,11 +31,18 @@ export function FollowButton({ handle }: { handle: string }) {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       const list: string[] = raw ? JSON.parse(raw) : [];
-      const next = list.includes(handle)
-        ? list.filter((h) => h !== handle)
-        : [...list, handle];
+      const nowFollowing = !list.includes(handle);
+      const next = nowFollowing
+        ? [...list, handle]
+        : list.filter((h) => h !== handle);
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      setFollowing(next.includes(handle));
+      setFollowing(nowFollowing);
+      toast.push({
+        message: nowFollowing
+          ? `You're following @${handle}.`
+          : `Unfollowed @${handle}.`,
+        tone: nowFollowing ? "success" : "info",
+      });
     } catch {
       // ignore
     }

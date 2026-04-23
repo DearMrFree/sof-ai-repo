@@ -4,23 +4,34 @@ import Link from "next/link";
 import { Build } from "@/lib/builds";
 import { AGENTS } from "@/lib/agents";
 import { cn } from "@/lib/cn";
-import { ArrowUpRight, MessageCircle, Sparkles, Star } from "lucide-react";
+import {
+  ArrowUpRight,
+  CircleDashed,
+  Hammer,
+  MessageCircle,
+  Rocket,
+  Sparkles,
+  Star,
+} from "lucide-react";
 
 const STATUS_STYLE = {
   shipped: {
     label: "Shipped",
     dot: "bg-emerald-400",
     chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    Icon: Rocket,
   },
   "in-progress": {
     label: "In progress",
     dot: "bg-amber-400",
     chip: "border-amber-500/30 bg-amber-500/10 text-amber-200",
+    Icon: Hammer,
   },
   draft: {
     label: "Draft",
     dot: "bg-zinc-500",
     chip: "border-zinc-700 bg-zinc-800/60 text-zinc-300",
+    Icon: CircleDashed,
   },
 } as const;
 
@@ -41,7 +52,7 @@ export function BuildCard({
   return (
     <article
       className={cn(
-        "group relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 transition hover:border-zinc-700 hover:bg-zinc-900/70",
+        "group sof-lift relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 hover:border-zinc-700 hover:bg-zinc-900/70",
         isHero ? "md:grid md:grid-cols-[1.1fr_1fr] md:gap-0" : "",
       )}
     >
@@ -64,7 +75,13 @@ export function BuildCard({
               "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.35), transparent 45%), radial-gradient(circle at 80% 70%, rgba(0,0,0,0.25), transparent 55%)",
           }}
         />
-        <span className={cn("relative drop-shadow-lg", isHero ? "text-7xl" : "text-5xl")}>
+        <span
+          className={cn(
+            "relative drop-shadow-lg transition-transform duration-500 ease-out",
+            "group-hover:-translate-y-1 group-hover:scale-105",
+            isHero ? "text-7xl" : "text-5xl",
+          )}
+        >
           {build.cover.emoji}
         </span>
 
@@ -75,7 +92,7 @@ export function BuildCard({
             status.chip,
           )}
         >
-          <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
+          <status.Icon className="h-3 w-3" />
           {status.label}
         </span>
 

@@ -38,7 +38,7 @@ export default function HomePage() {
               <br />
               Train anything.
               <br />
-              <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-rose-400 bg-clip-text text-transparent">
+              <span className="sof-sweep bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-rose-400 bg-clip-text text-transparent">
                 Build anything.
               </span>
             </h1>
@@ -52,17 +52,17 @@ export default function HomePage() {
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
-                href="/classroom"
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-5 py-3 text-sm font-medium text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400"
+                href="/signin"
+                className="group inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_20px_60px_-20px] shadow-fuchsia-500/50 transition hover:brightness-110"
               >
-                Enter the classroom
-                <ArrowRight className="h-4 w-4" />
+                Jump in — one click
+                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
               </Link>
               <Link
-                href="/learn"
+                href="/classroom"
                 className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-5 py-3 text-sm text-zinc-300 transition hover:bg-zinc-800"
               >
-                Browse programs
+                Peek inside the classroom
               </Link>
             </div>
 

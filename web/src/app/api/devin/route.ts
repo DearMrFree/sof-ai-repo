@@ -12,7 +12,12 @@ interface LaunchRequest {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as LaunchRequest;
+  let body: LaunchRequest;
+  try {
+    body = (await req.json()) as LaunchRequest;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   const apiKey = process.env.DEVIN_API_KEY;
   const enabled = process.env.DEVIN_TASKS_ENABLED === "true";
 

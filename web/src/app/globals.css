@@ -21,6 +21,137 @@ body {
   border-radius: 4px;
 }
 
+/* Respect users who prefer reduced motion — disable our custom animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * --- sof.ai motion system ---
+ * Utility-style animations reused across the app so delight is consistent.
+ * Keep this list short; each animation should have a clear job.
+ */
+
+/* Slow drift for ambient cover meshes on /u/[handle] and /signin. */
+@keyframes sof-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(1.5%, 1%, 0) scale(1.04);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+.animate-sof-drift {
+  animation: sof-drift 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Gentle float for hero icons / collaborator avatars. */
+@keyframes sof-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.animate-sof-float {
+  animation: sof-float 4s ease-in-out infinite;
+}
+
+/* Stagger-entrance for grids. Apply `animate-sof-in` to the item and
+   `[style.animation-delay]` inline to stagger. */
+@keyframes sof-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-sof-in {
+  animation: sof-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Shimmer for skeleton/loading states. */
+@keyframes sof-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.sof-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(39 39 42) 0%,
+    rgb(63 63 70) 50%,
+    rgb(39 39 42) 100%
+  );
+  background-size: 200% 100%;
+  animation: sof-shimmer 1.8s linear infinite;
+}
+
+/* Hover-lift used on cards (builds, profiles, programs). */
+.sof-lift {
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sof-lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 20px 40px -20px rgba(0, 0, 0, 0.6),
+    0 8px 20px -10px rgba(99, 102, 241, 0.25);
+}
+
+/* Slow-pulse for "live" markers — softer than Tailwind's `animate-pulse`. */
+@keyframes sof-live {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.92);
+  }
+}
+.animate-sof-live {
+  animation: sof-live 1.8s ease-in-out infinite;
+}
+
+/* Gradient text sweep for hero headlines. */
+@keyframes sof-sweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+.sof-sweep {
+  background-size: 200% 200%;
+  animation: sof-sweep 8s ease-in-out infinite;
+}
+
 /* Prose overrides for MDX content */
 .prose-sof {
   color: rgb(228 228 231);
