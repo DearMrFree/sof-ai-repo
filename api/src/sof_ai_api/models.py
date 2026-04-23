@@ -50,6 +50,26 @@ class LessonCompletion(SQLModel, table=True):
     completed_at: datetime = Field(default_factory=_utcnow)
 
 
+class Challenge(SQLModel, table=True):
+    """A user-reported challenge / friction / feedback item.
+
+    These are the `/feedback` submissions — the feedback loop that informs
+    design and curriculum changes. Status moves through new → triaged →
+    building → shipped. No unique constraint — duplicates are allowed; a
+    user might report the same thing from different pages.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    handle: str = Field(index=True)
+    body: str
+    tag: str = Field(index=True)  # "confusing" | "broken" | "missing" | "question" | "idea"
+    page_url: Optional[str] = None
+    lesson_slug: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="new", index=True)  # new | triaged | building | shipped
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 
