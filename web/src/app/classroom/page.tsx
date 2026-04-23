@@ -144,7 +144,7 @@ export default function ClassroomHome() {
                   <Link
                     key={p.slug}
                     href={`/learn/${p.slug}`}
-                    className="group rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 transition hover:border-indigo-500/50"
+                    className="group sof-lift rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 hover:border-indigo-500/50"
                   >
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-xl">
@@ -329,7 +329,7 @@ function RoomCard({
   return (
     <Link
       href={`/classroom/rooms/${slug}`}
-      className="group relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 transition hover:border-indigo-500/50"
+      className="group sof-lift relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 hover:border-indigo-500/50"
     >
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
@@ -340,7 +340,7 @@ function RoomCard({
         </div>
         {!isNew && liveCount > 0 && (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            <span className="animate-sof-live h-1.5 w-1.5 rounded-full bg-emerald-400" />
             {liveCount} live
           </span>
         )}
