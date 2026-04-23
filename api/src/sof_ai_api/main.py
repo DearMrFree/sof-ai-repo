@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
-from .routes import challenges, devin, health, progress
+from .routes import challenges, devin, health, progress, wallet
 from .settings import settings
 
 
@@ -33,6 +33,7 @@ app.include_router(health.router)
 app.include_router(progress.router)
 app.include_router(devin.router)
 app.include_router(challenges.router)
+app.include_router(wallet.router)
 
 
 @app.get("/")

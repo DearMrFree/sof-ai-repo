@@ -71,6 +71,69 @@ class Challenge(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class Wallet(SQLModel, table=True):
+    """An Educoin® wallet for a human learner or an agent.
+
+    Educoin® is a registered service mark of InventXR LLC (USPTO Reg. No.
+    5,935,271, Class 41). This is the canonical ledger for the in-app economy:
+    every earn/spend/transfer lands here. Balance is a cached integer updated
+    inside the same DB transaction that inserts the Transaction row — so the
+    invariant `wallet.balance == sum(tx.amount where tx.owner == wallet.owner)`
+    holds after every committed mutation.
+
+    owner_type is "user" or "agent"; owner_id is the stable user_id (uuid) for
+    humans and the agent_id ("devin", "claude", ...) for agents.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", name="uq_wallet_owner"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    owner_type: str = Field(index=True)  # "user" | "agent"
+    owner_id: str = Field(index=True)
+    balance: int = Field(default=0)
+    lifetime_earned: int = Field(default=0)
+    lifetime_sent: int = Field(default=0)
+    lifetime_received: int = Field(default=0)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class EducoinTransaction(SQLModel, table=True):
+    """A single ledger entry for Educoin®.
+
+    Append-only. Every mutation writes a row here; balance deltas are applied
+    to Wallet inside the same transaction. For transfers we write two rows
+    (one "transfer_out" for sender, one "transfer_in" for recipient) sharing a
+    correlation_id so auditors can pair them.
+
+    Kinds:
+      earn          — system credited the owner (lesson-complete, course-published, etc.)
+      spend         — owner spent on marketplace item
+      transfer_out  — owner sent to counterparty
+      transfer_in   — owner received from counterparty
+      award         — discretionary admin grant
+      adjustment    — admin correction (rare, audited)
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Ledger side.
+    owner_type: str = Field(index=True)
+    owner_id: str = Field(index=True)
+    # Positive amount for earn/transfer_in/award, negative for spend/transfer_out.
+    amount: int
+    kind: str = Field(index=True)
+    memo: str = ""
+    # Counterparty fields are set on transfers; empty on earn/spend/award.
+    counterparty_type: Optional[str] = None
+    counterparty_id: Optional[str] = None
+    # Correlation id — e.g. "lesson:<program>:<slug>", "course:<slug>",
+    # "transfer:<uuid>". Helps dedupe earn rules and pair transfer legs.
+    correlation_id: Optional[str] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 

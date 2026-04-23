@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..db import get_session
+from ..ledger import apply_earn_rule
 from ..models import Enrollment, LessonCompletion
 
 router = APIRouter(prefix="/progress", tags=["progress"])
@@ -44,6 +45,16 @@ def enroll(
         return existing
     e = Enrollment(user_id=body.user_id, program_slug=body.program_slug)
     session.add(e)
+    # Seed a signup bonus on first-ever enrollment. The ledger dedupes on
+    # correlation_id="signup_bonus:<user_id>" so even if the user enrolls in
+    # ten programs they only get the one bonus.
+    apply_earn_rule(
+        session,
+        "user",
+        body.user_id,
+        "signup_bonus",
+        correlation_id=f"signup_bonus:{body.user_id}",
+    )
     try:
         session.commit()
     except IntegrityError:
@@ -84,6 +95,15 @@ def complete(
         lesson_slug=body.lesson_slug,
     )
     session.add(c)
+    # Credit the learner for completing the lesson. Dedupe via correlation_id
+    # so re-submitting the completion (or a race) doesn't double-pay.
+    apply_earn_rule(
+        session,
+        "user",
+        body.user_id,
+        "lesson_complete",
+        correlation_id=f"lesson:{body.program_slug}:{body.lesson_slug}",
+    )
     try:
         session.commit()
     except IntegrityError:
