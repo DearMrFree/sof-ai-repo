@@ -156,6 +156,107 @@ class EducoinTransaction(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class Journal(SQLModel, table=True):
+    """A scholarly journal hosted on sof.ai (Journalism School of AI).
+
+    Designed to mirror Open Journal Systems' (OJS) data model — an open-source
+    scholarly publishing platform by PKP at SFU (https://pkp.sfu.ca/ojs) —
+    so we can federate 1:1 with a real OJS instance in a later phase. Slug
+    is canonical (used in URLs); editor_in_chief is the founding owner who
+    earns the `found_journal` Educoin® payout.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_journal_slug"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(index=True, max_length=80)
+    title: str = Field(max_length=200)
+    description: str = ""
+    topic_tags: str = ""  # comma-separated, keep this simple for v1
+    # OJS calls this "context" — on sof.ai a journal can belong to an agent
+    # school (e.g. journalism), but the owner is always a user or agent.
+    editor_in_chief_type: str  # "user" | "agent"
+    editor_in_chief_id: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class JournalArticle(SQLModel, table=True):
+    """A paper submitted (and possibly published) to a journal.
+
+    Status flow mirrors OJS: draft → submitted → under_review → accepted
+    → published | rejected. Authors is a JSON-ish comma-separated list of
+    owner keys ("user:uuid" / "agent:devin") so humans and agents are
+    first-class co-authors.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    journal_slug: str = Field(index=True)
+    title: str = Field(max_length=300)
+    abstract: str = ""
+    body: str = ""  # v1: plaintext/markdown; OJS uses a PDF/HTML galley
+    # Primary author — the submitter who earns the submit payout.
+    submitter_type: str  # "user" | "agent"
+    submitter_id: str = Field(index=True)
+    # Comma-separated additional authors, "user:abc,agent:devin". Optional.
+    coauthors: str = ""
+    status: str = Field(
+        default="submitted", index=True
+    )  # draft | submitted | under_review | accepted | published | rejected
+    published_issue_id: Optional[int] = Field(default=None, index=True)
+    submitted_at: datetime = Field(default_factory=_utcnow)
+    published_at: Optional[datetime] = None
+
+
+class JournalPeerReview(SQLModel, table=True):
+    """A single peer-review round on an article.
+
+    OJS supports anonymous / double-blind reviews; v1 keeps it transparent —
+    the reviewer identity is recorded. We require (article_id, reviewer)
+    to be unique so a reviewer can't double-claim the review payout.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "article_id",
+            "reviewer_type",
+            "reviewer_id",
+            name="uq_peer_review_reviewer",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    article_id: int = Field(index=True)
+    reviewer_type: str  # "user" | "agent"
+    reviewer_id: str = Field(index=True)
+    recommendation: str  # "accept" | "minor_revisions" | "major_revisions" | "reject"
+    comments: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class JournalIssue(SQLModel, table=True):
+    """A published issue — a bundle of accepted articles, released together.
+
+    Publishing an issue flips its articles from ``accepted`` → ``published``
+    and pays the editor-in-chief the ``issue_published`` payout.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "journal_slug", "volume", "number", name="uq_issue_volume_number"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    journal_slug: str = Field(index=True)
+    volume: int
+    number: int
+    title: str = ""
+    description: str = ""
+    published_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 

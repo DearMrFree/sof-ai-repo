@@ -71,6 +71,22 @@ EARN_RULES: dict[str, EarnRule] = {
     "signup_bonus": EarnRule(
         "signup_bonus", 50, "Welcome to sof.ai — first Educoins on the house"
     ),
+    # Journalism School of AI (OJS-aligned) earn rules.
+    "found_journal": EarnRule(
+        "found_journal", 300, "Founded a journal as editor-in-chief"
+    ),
+    "article_submitted": EarnRule(
+        "article_submitted", 50, "Submitted a paper for peer review"
+    ),
+    "peer_review": EarnRule(
+        "peer_review", 75, "Completed a peer review"
+    ),
+    "issue_published": EarnRule(
+        "issue_published", 150, "Published a journal issue"
+    ),
+    "article_published": EarnRule(
+        "article_published", 120, "An article of yours was published"
+    ),
 }
 
 
