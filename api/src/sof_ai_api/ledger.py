@@ -152,6 +152,12 @@ def credit(
     )
     session.add(tx)
     session.add(wallet)
+    # Wrap the insert in a SAVEPOINT so a constraint violation on
+    # ux_earn_correlation rolls back only this credit — not the caller's
+    # outer unit of work (e.g. the pending Enrollment / LessonCompletion
+    # that triggered this earn). Without the nested transaction, a race
+    # on the partial unique index would destroy the enrollment write too.
+    nested = session.begin_nested()
     try:
         session.flush()
     except IntegrityError:
@@ -160,8 +166,14 @@ def credit(
         # check and our flush. The partial unique index on
         # EducoinTransaction ensures only one of the two can win; we
         # treat the loser as a dedupe no-op, matching the happy-path
-        # _has_earn() short-circuit.
-        session.rollback()
+        # _has_earn() short-circuit. The savepoint rollback keeps the
+        # caller's outer transaction intact.
+        nested.rollback()
+        # The in-memory Wallet object was mutated before the flush; undo
+        # the balance / lifetime_earned deltas so the cached view matches
+        # what the DB actually holds.
+        wallet.balance -= amount
+        wallet.lifetime_earned -= amount
         return None
     return tx
 
