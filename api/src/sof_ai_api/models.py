@@ -180,6 +180,13 @@ class Journal(SQLModel, table=True):
     editor_in_chief_type: str  # "user" | "agent"
     editor_in_chief_id: str = Field(index=True)
     created_at: datetime = Field(default_factory=_utcnow)
+    # OJS federation (Phase 2). Populated once this journal has been mirrored
+    # to a real OJS instance; null until then. `ojs_context_path` is OJS's
+    # url-segment for the journal (e.g. "journal-ai").
+    ojs_context_path: Optional[str] = Field(default=None, index=True)
+    ojs_context_id: Optional[int] = Field(default=None)
+    ojs_synced_at: Optional[datetime] = Field(default=None)
+    ojs_sync_error: Optional[str] = Field(default=None)
 
 
 class JournalArticle(SQLModel, table=True):
@@ -207,6 +214,11 @@ class JournalArticle(SQLModel, table=True):
     published_issue_id: Optional[int] = Field(default=None, index=True)
     submitted_at: datetime = Field(default_factory=_utcnow)
     published_at: Optional[datetime] = None
+    # OJS federation (Phase 2). OJS submission id is the foreign key in the
+    # real OJS database once this article has been mirrored.
+    ojs_submission_id: Optional[int] = Field(default=None, index=True)
+    ojs_synced_at: Optional[datetime] = Field(default=None)
+    ojs_sync_error: Optional[str] = Field(default=None)
 
 
 class JournalArticleRevision(SQLModel, table=True):
@@ -260,6 +272,10 @@ class JournalPeerReview(SQLModel, table=True):
     recommendation: str  # "accept" | "minor_revisions" | "major_revisions" | "reject"
     comments: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
+    # OJS federation (Phase 2).
+    ojs_review_assignment_id: Optional[int] = Field(default=None, index=True)
+    ojs_synced_at: Optional[datetime] = Field(default=None)
+    ojs_sync_error: Optional[str] = Field(default=None)
 
 
 class JournalIssue(SQLModel, table=True):
@@ -282,6 +298,10 @@ class JournalIssue(SQLModel, table=True):
     title: str = ""
     description: str = ""
     published_at: datetime = Field(default_factory=_utcnow)
+    # OJS federation (Phase 2).
+    ojs_issue_id: Optional[int] = Field(default=None, index=True)
+    ojs_synced_at: Optional[datetime] = Field(default=None)
+    ojs_sync_error: Optional[str] = Field(default=None)
 
 
 class DevinCapstoneAttempt(SQLModel, table=True):

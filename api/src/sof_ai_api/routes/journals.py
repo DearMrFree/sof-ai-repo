@@ -25,12 +25,20 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..db import get_session
+from ..integrations.ojs import (
+    mirror_article,
+    mirror_issue,
+    mirror_journal,
+    mirror_review,
+    ojs_enabled,
+    resync_pending,
+)
 from ..ledger import apply_earn_rule
 from ..models import (
     Journal,
@@ -42,6 +50,32 @@ from ..models import (
 )
 from ..seed_journal_ai import seed as seed_journal_ai
 from .wallet import require_internal_auth
+
+# --- OJS mirror helpers ------------------------------------------------------
+# BackgroundTasks run after the response is sent and the request-scoped
+# SQLModel session is closed, so every mirror task opens its own fresh
+# session. All four are cheap no-ops when OJS is not configured.
+
+def _mirror_journal_bg(journal_id: int) -> None:
+    with next(get_session()) as session:
+        mirror_journal(session, journal_id)
+
+
+def _mirror_article_bg(article_id: int) -> None:
+    with next(get_session()) as session:
+        # Ensure the parent journal context exists in OJS first, then the
+        # article. mirror_article handles the dependency internally.
+        mirror_article(session, article_id)
+
+
+def _mirror_review_bg(review_id: int) -> None:
+    with next(get_session()) as session:
+        mirror_review(session, review_id)
+
+
+def _mirror_issue_bg(issue_id: int) -> None:
+    with next(get_session()) as session:
+        mirror_issue(session, issue_id)
 
 router = APIRouter(prefix="/journals", tags=["journals"])
 
@@ -222,6 +256,7 @@ def list_journals(
 )
 def create_journal(
     body: JournalIn,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> JournalOut:
     slug = _slugify(body.slug or body.title)
@@ -265,6 +300,8 @@ def create_journal(
             return _serialize_journal(session, existing)
         raise
     session.refresh(j)
+    if j.id is not None:
+        background_tasks.add_task(_mirror_journal_bg, j.id)
     return _serialize_journal(session, j)
 
 
@@ -300,6 +337,7 @@ def list_articles(
 def submit_article(
     slug: str,
     body: ArticleIn,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> ArticleOut:
     j = session.exec(select(Journal).where(Journal.slug == slug)).first()
@@ -328,6 +366,8 @@ def submit_article(
     )
     session.commit()
     session.refresh(a)
+    if a.id is not None:
+        background_tasks.add_task(_mirror_article_bg, a.id)
     return _serialize_article(a)
 
 
@@ -383,6 +423,7 @@ def submit_review(
     slug: str,
     article_id: int,
     body: PeerReviewIn,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> PeerReviewOut:
     a = session.exec(
@@ -430,6 +471,8 @@ def submit_review(
     )
     session.commit()
     session.refresh(r)
+    if r.id is not None:
+        background_tasks.add_task(_mirror_review_bg, r.id)
     return _serialize_review(r)
 
 
@@ -492,6 +535,33 @@ def seed_journal_ai_route(
     return seed_journal_ai(session)
 
 
+@router.get("/_ojs/status")
+def ojs_status() -> dict[str, object]:
+    """Report whether the OJS federation mirror is enabled.
+
+    Does not require internal auth — useful for the frontend Journalism
+    School page to badge a "federated with OJS" pill when the mirror is
+    live.
+    """
+    return {"enabled": ojs_enabled()}
+
+
+@router.post(
+    "/_ojs/resync",
+    dependencies=[Depends(require_internal_auth)],
+)
+def ojs_resync(
+    session: Session = Depends(get_session),
+) -> dict[str, int]:
+    """Retry mirroring every un-synced journal/article/review/issue.
+
+    Called after first standing up the OJS instance (to backfill existing
+    sof.ai data) and any time the mirror has been temporarily down.
+    Idempotent — rows already synced are skipped by id-null predicates.
+    """
+    return resync_pending(session)
+
+
 @router.post(
     "/{slug}/issues",
     response_model=IssueOut,
@@ -500,6 +570,7 @@ def seed_journal_ai_route(
 def publish_issue(
     slug: str,
     body: IssueIn,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> IssueOut:
     j = session.exec(select(Journal).where(Journal.slug == slug)).first()
@@ -560,6 +631,8 @@ def publish_issue(
     )
     session.commit()
     session.refresh(issue)
+    if issue.id is not None:
+        background_tasks.add_task(_mirror_issue_bg, issue.id)
     return IssueOut(
         id=issue.id or 0,
         journal_slug=issue.journal_slug,
