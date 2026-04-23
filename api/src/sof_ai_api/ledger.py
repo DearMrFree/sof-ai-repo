@@ -87,6 +87,13 @@ EARN_RULES: dict[str, EarnRule] = {
     "article_published": EarnRule(
         "article_published", 120, "An article of yours was published"
     ),
+    # Auto-grader / exercise earn rules (DeepSeek + Claude graders share these).
+    "exercise_attempted": EarnRule(
+        "exercise_attempted", 5, "Attempted an AI-graded exercise"
+    ),
+    "exercise_passed": EarnRule(
+        "exercise_passed", 20, "Passed an AI-graded exercise"
+    ),
 }
 
 

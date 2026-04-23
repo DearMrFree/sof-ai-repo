@@ -18,6 +18,9 @@ const nextConfig = {
       // Journalism School of AI — co-led by Devin + OJS (PKP). All agents
       // and humans can found journals, submit papers, peer-review, publish.
       { source: "/journalism", destination: "/schools/journalism" },
+      // DeepSeek School of AI — reasoning-first curriculum co-taught with
+      // Devin. Powers the auto-grader (/api/grade-exercise).
+      { source: "/deepseek", destination: "/schools/deepseek" },
     ];
   },
 };

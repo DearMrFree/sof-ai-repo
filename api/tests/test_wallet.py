@@ -11,6 +11,67 @@ init_db()
 client = TestClient(app)
 
 
+def test_wallet_earn_route_applies_rule_and_dedupes() -> None:
+    """POST /wallet/earn should credit on first call and be a no-op on
+    second call with the same correlation_id — the internal-proxy path the
+    auto-grader uses to pay out ``exercise_passed`` from the Next.js API."""
+    # First attempt earns 5 EDU.
+    r1 = client.post(
+        "/wallet/earn",
+        json={
+            "owner_type": "user",
+            "owner_id": "u-earner",
+            "rule": "exercise_attempted",
+            "correlation_id": "exercise:some-slug:u-earner:attempt",
+        },
+    )
+    assert r1.status_code == 200, r1.text
+    b1 = r1.json()
+    assert b1["applied"] is True
+    assert b1["amount"] == 5
+    assert b1["balance"] == 5
+
+    # Retry is deduped (same correlation_id).
+    r2 = client.post(
+        "/wallet/earn",
+        json={
+            "owner_type": "user",
+            "owner_id": "u-earner",
+            "rule": "exercise_attempted",
+            "correlation_id": "exercise:some-slug:u-earner:attempt",
+        },
+    )
+    assert r2.status_code == 200, r2.text
+    b2 = r2.json()
+    assert b2["applied"] is False
+    assert b2["balance"] == 5, "balance should not double-credit"
+
+    # Passing the same exercise separately earns exercise_passed (+20).
+    rp = client.post(
+        "/wallet/earn",
+        json={
+            "owner_type": "user",
+            "owner_id": "u-earner",
+            "rule": "exercise_passed",
+            "correlation_id": "exercise:some-slug:u-earner:pass",
+        },
+    )
+    assert rp.status_code == 200, rp.text
+    assert rp.json()["balance"] == 25
+
+
+def test_wallet_earn_rejects_unknown_rule() -> None:
+    r = client.post(
+        "/wallet/earn",
+        json={
+            "owner_type": "user",
+            "owner_id": "u-unknown",
+            "rule": "does_not_exist",
+        },
+    )
+    assert r.status_code == 400, r.text
+
+
 def test_wallet_created_on_first_read() -> None:
     r = client.get("/wallet/user/u-fresh")
     assert r.status_code == 200

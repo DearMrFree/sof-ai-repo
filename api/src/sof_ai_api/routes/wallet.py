@@ -25,6 +25,7 @@ from ..ledger import (
     EARN_RULES,
     InsufficientFundsError,
     LedgerError,
+    apply_earn_rule,
     get_or_create_wallet,
     transfer,
 )
@@ -128,6 +129,54 @@ def _serialize_tx(t: EducoinTransaction) -> TransactionOut:
         counterparty_id=t.counterparty_id,
         correlation_id=t.correlation_id,
         created_at=t.created_at.isoformat(),
+    )
+
+
+class EarnIn(BaseModel):
+    owner_type: OwnerType
+    owner_id: str = Field(..., min_length=1)
+    rule: str = Field(..., min_length=1)
+    correlation_id: Optional[str] = None
+
+
+class EarnOut(BaseModel):
+    applied: bool
+    rule: str
+    amount: int
+    balance: int
+
+
+@router.post("/earn", response_model=EarnOut)
+def earn(
+    body: EarnIn,
+    session: Session = Depends(get_session),
+    _auth: None = Depends(require_internal_auth),
+) -> EarnOut:
+    """Award an earn rule to an owner. Idempotent on ``(owner, correlation_id)``
+    so the Next.js grader proxy can retry safely. Requires the same internal
+    auth gate as ``/transfer`` — public clients cannot self-credit."""
+    rule = EARN_RULES.get(body.rule)
+    if rule is None:
+        raise HTTPException(status_code=400, detail=f"Unknown rule: {body.rule}")
+    try:
+        tx = apply_earn_rule(
+            session,
+            body.owner_type,
+            body.owner_id,
+            body.rule,
+            correlation_id=body.correlation_id,
+        )
+    except LedgerError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    w = get_or_create_wallet(session, body.owner_type, body.owner_id)
+    session.commit()
+    session.refresh(w)
+    return EarnOut(
+        applied=tx is not None,
+        rule=body.rule,
+        amount=rule.amount,
+        balance=w.balance,
     )
 
 
