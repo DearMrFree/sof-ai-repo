@@ -11,7 +11,7 @@ const navLinks = [
   { href: "/classroom", label: "Classroom", icon: Users },
   { href: "/classroom/feed", label: "Feed", icon: Newspaper },
   { href: "/classroom/assignments", label: "Assignments", icon: ClipboardList },
-  { href: "/devin", label: "Devin School", icon: School },
+  { href: "/schools", label: "Schools", icon: School },
   { href: "/u", label: "People", icon: UserCircle2 },
 ];
 

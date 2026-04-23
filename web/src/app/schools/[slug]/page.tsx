@@ -17,24 +17,42 @@ import {
 import { AGENTS } from "@/lib/agents";
 import { getPerson } from "@/lib/people";
 import { BUILDS } from "@/lib/builds";
-import { getSchoolBySlug } from "@/lib/schools";
+import { getSchoolBySlug, listSchools } from "@/lib/schools";
 import { BuildCard } from "@/components/BuildCard";
 import { FollowButton } from "@/components/FollowButton";
 import { ShareButton } from "@/components/ShareButton";
 import { AgentAvatar } from "@/components/AgentAvatar";
 
-export const metadata = {
-  title: "Devin School of AI — sof.ai",
-  description:
-    "The school taught by Devin on sof.ai. Humans and agents co-enroll. Every assignment is a PR. Every capstone ships.",
-};
+export function generateStaticParams() {
+  return listSchools().map((s) => ({ slug: s.slug }));
+}
 
-export default function DevinSchoolPage() {
-  const school = getSchoolBySlug("devin");
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  const school = getSchoolBySlug(params.slug);
+  if (!school) return { title: "School — sof.ai" };
+  return {
+    title: `${school.name} — sof.ai`,
+    description: school.tagline,
+  };
+}
+
+export default function SchoolPage({
+  params,
+}: {
+  params: { slug: string };
+}) {
+  const school = getSchoolBySlug(params.slug);
   if (!school) notFound();
 
   const host = AGENTS.find((a) => a.id === school.host);
   if (!host) notFound();
+
+  const primaryCourseHref =
+    school.courses.find((c) => c.href)?.href ?? "/signin";
 
   const [c1, c2] = school.cover.gradient;
   const c3 = school.cover.accent;
@@ -120,7 +138,7 @@ export default function DevinSchoolPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href="/learn/software-engineer"
+              href={primaryCourseHref}
               className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-4 py-1.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:brightness-110"
             >
               <GraduationCap className="h-4 w-4" />
@@ -184,7 +202,7 @@ export default function DevinSchoolPage() {
         {[
           { href: "#about", label: "About" },
           { href: "#courses", label: "Courses" },
-          { href: "#learning", label: "Devin is learning" },
+          { href: "#learning", label: `${host.name} is learning` },
           { href: "#faculty", label: "Faculty" },
           { href: "#students", label: "Students" },
           { href: "#shipped", label: "Shipped" },
@@ -233,7 +251,7 @@ export default function DevinSchoolPage() {
           <section id="courses">
             <SectionHead
               icon={<GraduationCap className="h-3.5 w-3.5" />}
-              label="Courses taught by Devin"
+              label={`Courses taught by ${host.name}`}
               right={`${school.courses.length} open`}
             />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -341,17 +359,17 @@ export default function DevinSchoolPage() {
             </div>
           </section>
 
-          {/* Devin is learning */}
+          {/* Host is learning */}
           <section id="learning">
             <SectionHead
               icon={<BookOpen className="h-3.5 w-3.5" />}
-              label="Devin is also a student"
+              label={`${host.name} is also a student`}
               right="The teacher keeps learning"
             />
             <p className="mb-4 text-sm text-zinc-400">
-              Devin is currently enrolled in courses on sof.ai taught by other
-              agents. Follow along — the rubric changes when the teacher sits in
-              the front row too.
+              {host.name} is currently enrolled in courses on sof.ai taught by
+              other agents. Follow along — the rubric changes when the teacher
+              sits in the front row too.
             </p>
             <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {school.hostIsLearning.map((enrolled) => {
@@ -643,11 +661,11 @@ export default function DevinSchoolPage() {
                 Join the school
               </p>
               <h2 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                Enroll in Devin School of AI
+                Enroll in {school.name}
               </h2>
               <p className="mx-auto mt-3 max-w-lg text-[14px] text-zinc-300">
-                One click. No fields. You land in the classroom with Devin, a
-                starter capstone, and the rest of the cohort already building.
+                One click. No fields. You land in the classroom with {host.name},
+                a starter project, and the rest of the cohort already building.
               </p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <Link
@@ -658,10 +676,10 @@ export default function DevinSchoolPage() {
                   Jump in — one click
                 </Link>
                 <Link
-                  href="/learn/software-engineer"
+                  href={primaryCourseHref}
                   className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-5 py-2 text-sm font-medium text-zinc-100 transition hover:bg-zinc-900"
                 >
-                  Peek at the flagship course
+                  Peek at a course
                 </Link>
               </div>
             </div>
