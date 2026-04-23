@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..db import get_session
@@ -43,7 +44,22 @@ def enroll(
         return existing
     e = Enrollment(user_id=body.user_id, program_slug=body.program_slug)
     session.add(e)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Another concurrent request inserted the same (user_id, program_slug)
+        # between our SELECT and INSERT. The unique constraint on Enrollment
+        # catches it; fall back to the now-existing row.
+        session.rollback()
+        existing = session.exec(
+            select(Enrollment).where(
+                Enrollment.user_id == body.user_id,
+                Enrollment.program_slug == body.program_slug,
+            )
+        ).first()
+        if existing:
+            return existing
+        raise
     session.refresh(e)
     return e
 
@@ -68,7 +84,21 @@ def complete(
         lesson_slug=body.lesson_slug,
     )
     session.add(c)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Concurrent completion write. See enroll() above for rationale.
+        session.rollback()
+        existing = session.exec(
+            select(LessonCompletion).where(
+                LessonCompletion.user_id == body.user_id,
+                LessonCompletion.program_slug == body.program_slug,
+                LessonCompletion.lesson_slug == body.lesson_slug,
+            )
+        ).first()
+        if existing:
+            return existing
+        raise
     session.refresh(c)
     return c
 
