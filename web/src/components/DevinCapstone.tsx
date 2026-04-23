@@ -52,11 +52,17 @@ export function DevinCapstone({
           title: capstone.title,
         }),
       });
+      if (!res.ok) {
+        throw new Error(`Launch failed (${res.status})`);
+      }
       const data = (await res.json()) as {
         sessionUrl: string;
         prUrl?: string;
         stub?: boolean;
       };
+      if (!data.sessionUrl) {
+        throw new Error("Launch response missing sessionUrl");
+      }
       if (data.prUrl) {
         setState({
           phase: "complete",
