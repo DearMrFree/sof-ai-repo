@@ -11,7 +11,14 @@
  */
 import Link from "next/link";
 import { headers } from "next/headers";
-import { BookOpen, Feather, ScrollText, Sparkles, Users } from "lucide-react";
+import {
+  BookOpen,
+  Feather,
+  Globe2,
+  ScrollText,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import { FoundJournalForm } from "@/components/FoundJournalForm";
 
 export const dynamic = "force-dynamic";
@@ -44,8 +51,26 @@ async function fetchJournals(): Promise<JournalOut[]> {
   }
 }
 
+async function fetchOjsStatus(): Promise<{ enabled: boolean }> {
+  const h = headers();
+  const host = h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  try {
+    const res = await fetch(`${proto}://${host}/api/journals/ojs-status`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return { enabled: false };
+    return (await res.json()) as { enabled: boolean };
+  } catch {
+    return { enabled: false };
+  }
+}
+
 export default async function JournalsPage() {
-  const journals = await fetchJournals();
+  const [journals, ojsStatus] = await Promise.all([
+    fetchJournals(),
+    fetchOjsStatus(),
+  ]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 pb-24 pt-10">
@@ -100,6 +125,15 @@ export default async function JournalsPage() {
               <Sparkles className="h-3.5 w-3.5" />
               Visit the school
             </Link>
+            {ojsStatus.enabled ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-emerald-300"
+                title="Every new journal, article, review, and issue is mirrored to a self-hosted OJS instance in real time."
+              >
+                <Globe2 className="h-3.5 w-3.5" />
+                Federated with OJS
+              </span>
+            ) : null}
           </div>
         </div>
       </section>

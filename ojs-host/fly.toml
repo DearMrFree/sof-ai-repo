@@ -1,0 +1,52 @@
+# Fly app config for the sof.ai OJS instance.
+# Deploy with:   fly deploy -c ojs-host/fly.toml
+#
+# Prerequisites:
+#   1. `fly apps create sofai-ojs`
+#   2. `fly volumes create ojs_files -a sofai-ojs --size 3 --region iad`
+#   3. Attach a PostgreSQL database (existing Fly PG or a fresh one):
+#      `fly pg attach <pg-app> -a sofai-ojs --database-name ojs`
+#   4. Set the scholarly-files secrets:
+#      `fly secrets set -a sofai-ojs OJS_DB_HOST=... OJS_DB_USER=... OJS_DB_PASSWORD=... OJS_DB_NAME=ojs`
+#   5. `fly deploy -c ojs-host/fly.toml`
+#
+# Then walk the OJS install wizard at https://sofai-ojs.fly.dev — see
+# ojs-host/README.md for the full recipe including minting the API token
+# that ``sof-ai-api`` uses to federate journals.
+
+app = "sofai-ojs"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # OJS_BASE_URL is injected into config.inc.php by the entrypoint.
+  OJS_BASE_URL = "https://sofai-ojs.fly.dev"
+
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/"
+
+[[mounts]]
+  # OJS stores scholarly files (uploads, galleys, supplementary data) in
+  # /var/www/files. Mounting a Fly volume means those persist across
+  # deploys and machine restarts.
+  source = "ojs_files"
+  destination = "/var/www/files"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
