@@ -173,6 +173,67 @@ def test_publish_issue_flips_articles_and_pays_eic_and_authors() -> None:
     assert author_after - author_before == 120, "article_published payout"
 
 
+def test_seed_journal_ai_is_idempotent_and_creates_founding_article() -> None:
+    """The Journal AI seed must create a journal, founding article, peer
+    reviews, and volume 1 issue 1 on first run — and be a cheap no-op on
+    subsequent runs. This is the lifespan-startup hook that plants the
+    flagship journal on every cold boot."""
+    from sof_ai_api.db import get_session
+    from sof_ai_api.seed_journal_ai import (
+        ARTICLE_TITLE,
+        JOURNAL_SLUG,
+        PEER_REVIEWS,
+        REVISIONS,
+        seed,
+    )
+
+    # Fresh run should create everything.
+    s1 = next(get_session())
+    first = seed(s1)
+    s1.close()
+    assert first["journal_slug"] == JOURNAL_SLUG
+    # Could be created=True if first time, or False if prior tests triggered
+    # the lifespan seed. Either way the flags + counts should be consistent.
+    assert isinstance(first["article_id"], int)
+
+    # Second run is a no-op.
+    s2 = next(get_session())
+    second = seed(s2)
+    s2.close()
+    assert second["journal_created"] is False
+    assert second["article_created"] is False
+    assert second["issue_created"] is False
+    assert second["revisions_created"] == 0
+    assert second["reviews_created"] == 0
+
+    # Article should be fetchable from the public API.
+    article = client.get(
+        f"/journals/{JOURNAL_SLUG}/articles/{first['article_id']}"
+    ).json()
+    assert article["title"] == ARTICLE_TITLE
+    assert article["status"] == "published"
+    # Co-authored with Devin.
+    assert "agent:devin" in article["coauthors"]
+
+    # All seeded peer reviews should be present.
+    reviews = client.get(
+        f"/journals/{JOURNAL_SLUG}/articles/{first['article_id']}/reviews"
+    ).json()
+    assert len(reviews) == len(PEER_REVIEWS)
+    # Includes at least one agent review (Claude) and one human review.
+    kinds = {(r["reviewer_type"], r["reviewer_id"]) for r in reviews}
+    assert ("agent", "claude") in kinds
+    assert ("user", "ada") in kinds
+
+    # Revisions endpoint exposes the evolving-document history.
+    revs = client.get(
+        f"/journals/{JOURNAL_SLUG}/articles/{first['article_id']}/revisions"
+    ).json()
+    assert len(revs) == len(REVISIONS)
+    assert revs[0]["revision_no"] == 1
+    assert revs[-1]["revision_no"] == len(REVISIONS)
+
+
 def test_publish_issue_rejects_duplicate_volume_number() -> None:
     j = _found_journal(slug="dup-issue-test", eic="u-editor-5")
     client.post(

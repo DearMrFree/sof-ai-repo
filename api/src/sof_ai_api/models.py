@@ -209,6 +209,33 @@ class JournalArticle(SQLModel, table=True):
     published_at: Optional[datetime] = None
 
 
+class JournalArticleRevision(SQLModel, table=True):
+    """A historical snapshot of an article's body.
+
+    Articles on sof.ai are living documents — authors revise in response to
+    peer reviews, new PRs shipped against the underlying claim, etc. Every
+    revision is preserved so editors can diff them over time without losing
+    earlier versions. Revision 1 is the submission; subsequent revisions
+    are numbered sequentially per article.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "article_id", "revision_no", name="uq_revision_article_number"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    article_id: int = Field(index=True)
+    revision_no: int
+    # Who made the revision (the author, an editor, or an agent helper).
+    revised_by_type: str  # "user" | "agent"
+    revised_by_id: str = Field(index=True)
+    changelog: str = ""
+    body: str  # full snapshot (not a diff — small table, cheap storage)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class JournalPeerReview(SQLModel, table=True):
     """A single peer-review round on an article.
 

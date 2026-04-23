@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { ArrowLeft, MessageSquare, ShieldCheck } from "lucide-react";
+import { ArrowLeft, History, MessageSquare, ShieldCheck } from "lucide-react";
 import { SubmitReviewForm } from "@/components/SubmitReviewForm";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +30,17 @@ interface ReviewOut {
   reviewer_id: string;
   recommendation: string;
   comments: string;
+  created_at: string;
+}
+
+interface RevisionOut {
+  id: number;
+  article_id: number;
+  revision_no: number;
+  revised_by_type: string;
+  revised_by_id: string;
+  changelog: string;
+  body: string;
   created_at: string;
 }
 
@@ -65,6 +76,23 @@ async function fetchReviews(slug: string, id: string): Promise<ReviewOut[]> {
   return (await res.json()) as ReviewOut[];
 }
 
+async function fetchRevisions(
+  slug: string,
+  id: string,
+): Promise<RevisionOut[]> {
+  const h = headers();
+  const host = h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  const res = await fetch(
+    `${proto}://${host}/api/journals/${encodeURIComponent(
+      slug,
+    )}/articles/${encodeURIComponent(id)}/revisions`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) return [];
+  return (await res.json()) as RevisionOut[];
+}
+
 const RECOMMENDATION_LABELS: Record<string, string> = {
   accept: "Accept",
   minor_revisions: "Minor revisions",
@@ -77,9 +105,10 @@ export default async function ArticlePage({
 }: {
   params: { slug: string; id: string };
 }) {
-  const [article, reviews] = await Promise.all([
+  const [article, reviews, revisions] = await Promise.all([
     fetchArticle(params.slug, params.id),
     fetchReviews(params.slug, params.id),
+    fetchRevisions(params.slug, params.id),
   ]);
   if (!article) notFound();
 
@@ -155,6 +184,36 @@ export default async function ArticlePage({
             <MessageSquare className="h-4 w-4 text-zinc-500" /> Reviews (
             {reviews.length})
           </h2>
+          {revisions.length > 1 ? (
+            <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
+              <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-zinc-400">
+                <History className="h-3.5 w-3.5" /> Revision history
+              </h3>
+              <ol className="mt-3 space-y-2">
+                {revisions.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-start gap-3 border-l-2 border-teal-500/40 pl-3"
+                  >
+                    <span className="mt-0.5 shrink-0 rounded-full border border-teal-500/30 bg-teal-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-teal-300">
+                      rev {r.revision_no}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm text-zinc-300">{r.changelog}</p>
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
+                        by {r.revised_by_type}:{r.revised_by_id.slice(0, 10)}
+                        {r.revised_by_id.length > 10 ? "…" : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-3 text-[11px] text-zinc-500">
+                Articles on Journal AI are living documents — revisions are
+                preserved, never overwritten.
+              </p>
+            </div>
+          ) : null}
           {reviews.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/40 p-10 text-center text-sm text-zinc-500">
               No reviews yet.

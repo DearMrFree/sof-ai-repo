@@ -35,10 +35,12 @@ from ..ledger import apply_earn_rule
 from ..models import (
     Journal,
     JournalArticle,
+    JournalArticleRevision,
     JournalIssue,
     JournalPeerReview,
     _utcnow,
 )
+from ..seed_journal_ai import seed as seed_journal_ai
 from .wallet import require_internal_auth
 
 router = APIRouter(prefix="/journals", tags=["journals"])
@@ -429,6 +431,65 @@ def submit_review(
     session.commit()
     session.refresh(r)
     return _serialize_review(r)
+
+
+class RevisionOut(BaseModel):
+    id: int
+    article_id: int
+    revision_no: int
+    revised_by_type: str
+    revised_by_id: str
+    changelog: str
+    body: str
+    created_at: str
+
+
+@router.get(
+    "/{slug}/articles/{article_id}/revisions",
+    response_model=list[RevisionOut],
+)
+def list_revisions(
+    slug: str,
+    article_id: int,
+    session: Session = Depends(get_session),
+) -> list[RevisionOut]:
+    a = session.exec(
+        select(JournalArticle).where(
+            JournalArticle.journal_slug == slug,
+            JournalArticle.id == article_id,
+        )
+    ).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Article not found.")
+    revs = session.exec(
+        select(JournalArticleRevision)
+        .where(JournalArticleRevision.article_id == article_id)
+        .order_by(JournalArticleRevision.revision_no.asc())
+    ).all()
+    return [
+        RevisionOut(
+            id=r.id or 0,
+            article_id=r.article_id,
+            revision_no=r.revision_no,
+            revised_by_type=r.revised_by_type,
+            revised_by_id=r.revised_by_id,
+            changelog=r.changelog,
+            body=r.body,
+            created_at=r.created_at.isoformat(),
+        )
+        for r in revs
+    ]
+
+
+@router.post(
+    "/_seed/journal-ai",
+    dependencies=[Depends(require_internal_auth)],
+)
+def seed_journal_ai_route(
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    """Re-run the Journal AI seed. Idempotent. Admin-gated via internal auth."""
+    return seed_journal_ai(session)
 
 
 @router.post(
