@@ -47,12 +47,18 @@ export async function POST(req: NextRequest) {
     `- You know this lesson cold — speak in specifics, not generalities.`,
   ].join("\n");
 
-  const anthropicMessages = body.messages
+  const cleaned = body.messages
     .filter((m) => m.content.trim().length > 0)
     .map((m) => ({
       role: m.role,
       content: m.content,
     }));
+  // Anthropic requires the message array to start with a `user` role message.
+  // Strip any leading assistant messages (e.g. synthetic greetings composed
+  // client-side before the first user turn).
+  const firstUserIdx = cleaned.findIndex((m) => m.role === "user");
+  const anthropicMessages =
+    firstUserIdx > 0 ? cleaned.slice(firstUserIdx) : cleaned;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

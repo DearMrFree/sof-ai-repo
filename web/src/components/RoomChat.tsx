@@ -74,7 +74,7 @@ export function RoomChat({
     agentId: string,
     prior: Message[],
     onToken: (delta: string) => void,
-  ) {
+  ): Promise<string> {
     // Build Claude-compatible message list from the room transcript.
     const apiMessages = prior
       .filter((m) => m.content.trim().length > 0)
@@ -117,6 +117,7 @@ export function RoomChat({
       acc += chunk;
       onToken(acc);
     }
+    return acc;
   }
 
   async function send() {
@@ -152,20 +153,23 @@ export function RoomChat({
         };
         running = [...running, placeholder];
         setMessages(running);
-        await streamAgent(agentId, running.slice(0, -1), (acc) => {
-          setMessages((m) => {
-            const copy = [...m];
-            const idx = copy.findIndex((x) => x.id === placeholder.id);
-            if (idx >= 0)
-              copy[idx] = { ...copy[idx], content: acc };
-            return copy;
-          });
-        });
-        // Update running reference so next agent sees the finished message.
+        const finalText = await streamAgent(
+          agentId,
+          running.slice(0, -1),
+          (acc) => {
+            setMessages((m) => {
+              const copy = [...m];
+              const idx = copy.findIndex((x) => x.id === placeholder.id);
+              if (idx >= 0) copy[idx] = { ...copy[idx], content: acc };
+              return copy;
+            });
+          },
+        );
+        // Update running reference so the next agent sees the finished
+        // message with its real content. Derived from streamAgent's return
+        // value (not the DOM) so it's reliable regardless of React batching.
         running = running.map((m) =>
-          m.id === placeholder.id
-            ? { ...m, content: (document.getElementById(placeholder.id)?.textContent ?? "") }
-            : m,
+          m.id === placeholder.id ? { ...m, content: finalText } : m,
         );
       }
     } catch (err) {
