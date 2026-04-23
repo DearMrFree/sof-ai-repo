@@ -27,6 +27,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from .models import EducoinTransaction, Wallet, _utcnow
@@ -151,7 +152,17 @@ def credit(
     )
     session.add(tx)
     session.add(wallet)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError:
+        # Race lost: a concurrent transaction inserted the same earn
+        # (owner_type, owner_id, correlation_id) between our _has_earn()
+        # check and our flush. The partial unique index on
+        # EducoinTransaction ensures only one of the two can win; we
+        # treat the loser as a dedupe no-op, matching the happy-path
+        # _has_earn() short-circuit.
+        session.rollback()
+        return None
     return tx
 
 

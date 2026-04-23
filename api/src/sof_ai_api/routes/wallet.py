@@ -15,7 +15,7 @@ Endpoints:
 from datetime import timedelta
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -29,6 +29,29 @@ from ..ledger import (
     transfer,
 )
 from ..models import EducoinTransaction, Wallet, _utcnow
+from ..settings import settings
+
+
+def require_internal_auth(
+    x_internal_auth: Optional[str] = Header(default=None),
+) -> None:
+    """Gate for internal / mutating Educoin routes.
+
+    When ``settings.internal_api_key`` is set (production), requests must
+    carry a matching ``X-Internal-Auth`` header — the Next.js proxy adds it
+    server-side from the same env var, so only our own frontend can drive
+    transfers. An empty ``internal_api_key`` disables the gate, which is
+    what local dev and the pytest suite use (they hit the app via
+    TestClient and don't forge headers).
+    """
+    expected = settings.internal_api_key
+    if not expected:
+        return
+    if not x_internal_auth or x_internal_auth != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="Educoin® transfers require a valid internal auth header.",
+        )
 
 router = APIRouter(prefix="/wallet", tags=["wallet"])
 
@@ -190,6 +213,7 @@ def list_transactions(
 def transfer_edu(
     body: TransferIn,
     session: Session = Depends(get_session),
+    _auth: None = Depends(require_internal_auth),
 ) -> TransferOut:
     try:
         out_tx, in_tx = transfer(

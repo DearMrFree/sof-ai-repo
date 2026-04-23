@@ -2,8 +2,10 @@
 
 from fastapi.testclient import TestClient
 
-from sof_ai_api.db import init_db
+from sof_ai_api.db import get_session, init_db
+from sof_ai_api.ledger import credit
 from sof_ai_api.main import app
+from sof_ai_api.settings import settings
 
 init_db()
 client = TestClient(app)
@@ -166,6 +168,111 @@ def test_earn_rules_public_catalog() -> None:
     body = r.json()
     keys = {item["key"] for item in body}
     assert {"lesson_complete", "module_complete", "course_published"}.issubset(keys)
+
+
+def test_transfer_requires_internal_auth_when_enabled() -> None:
+    """The FastAPI /wallet/transfer endpoint must reject unsigned calls
+    when INTERNAL_API_KEY is configured — this is what prevents an attacker
+    who knows the public Fly URL from spoofing sender_id on someone else's
+    wallet. The Next.js proxy forwards the key from a server-side env var."""
+    # Seed sender with some EDU.
+    client.post(
+        "/progress/enroll",
+        json={"user_id": "u-auth-gate", "program_slug": "software-engineer"},
+    )
+
+    original = settings.internal_api_key
+    try:
+        settings.internal_api_key = "test-secret"
+
+        # No header → 401.
+        bad = client.post(
+            "/wallet/transfer",
+            json={
+                "sender_type": "user",
+                "sender_id": "u-auth-gate",
+                "recipient_type": "user",
+                "recipient_id": "u-auth-gate-recipient",
+                "amount": 5,
+            },
+        )
+        assert bad.status_code == 401
+
+        # Wrong header → 401.
+        wrong = client.post(
+            "/wallet/transfer",
+            json={
+                "sender_type": "user",
+                "sender_id": "u-auth-gate",
+                "recipient_type": "user",
+                "recipient_id": "u-auth-gate-recipient",
+                "amount": 5,
+            },
+            headers={"X-Internal-Auth": "not-the-secret"},
+        )
+        assert wrong.status_code == 401
+
+        # Correct header → success.
+        good = client.post(
+            "/wallet/transfer",
+            json={
+                "sender_type": "user",
+                "sender_id": "u-auth-gate",
+                "recipient_type": "user",
+                "recipient_id": "u-auth-gate-recipient",
+                "amount": 5,
+            },
+            headers={"X-Internal-Auth": "test-secret"},
+        )
+        assert good.status_code == 200, good.text
+    finally:
+        settings.internal_api_key = original
+
+
+def test_partial_unique_index_prevents_duplicate_earn() -> None:
+    """The partial unique index on EducoinTransaction
+    (owner_type, owner_id, correlation_id) WHERE kind='earn' backs up the
+    application-level dedupe check. Simulate the race: commit a first earn,
+    then attempt a second earn with the same correlation_id via a parallel
+    session whose application-level check has already passed. ``credit()``
+    must return None (no-op) rather than inserting a duplicate.
+    """
+    owner_type, owner_id = "user", "u-race"
+    corr = "signup_bonus:u-race"
+
+    s1 = next(get_session())
+    first = credit(
+        s1,
+        owner_type,
+        owner_id,
+        50,
+        kind="earn",
+        memo="welcome",
+        correlation_id=corr,
+    )
+    assert first is not None
+    s1.commit()
+    s1.close()
+
+    # Second insert with the same correlation_id must be a no-op. A fresh
+    # session means the caller can't rely on session-local state; the DB
+    # constraint is what enforces correctness.
+    s2 = next(get_session())
+    second = credit(
+        s2,
+        owner_type,
+        owner_id,
+        50,
+        kind="earn",
+        memo="welcome again",
+        correlation_id=corr,
+    )
+    assert second is None, "partial unique index should dedupe the race"
+    s2.commit()
+    s2.close()
+
+    w = client.get(f"/wallet/user/{owner_id}").json()
+    assert w["balance"] == 50
 
 
 def test_top_earners_returns_a_list() -> None:

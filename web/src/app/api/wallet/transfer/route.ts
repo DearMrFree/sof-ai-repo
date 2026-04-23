@@ -69,10 +69,22 @@ export async function POST(req: Request) {
     );
   }
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  // Forward the shared secret that the FastAPI /wallet/transfer route
+  // requires in production — this is what prevents direct calls to the
+  // public Fly backend from spoofing `sender_id` on someone else's
+  // wallet. Mirrors settings.internal_api_key on the API side.
+  const internalKey = process.env.INTERNAL_API_KEY;
+  if (internalKey) {
+    headers["X-Internal-Auth"] = internalKey;
+  }
+
   try {
     const res = await fetch(`${getApiBaseUrl()}/wallet/transfer`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         sender_type: "user",
         sender_id: sessionUser.id,

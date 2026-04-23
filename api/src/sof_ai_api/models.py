@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Optional
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 
@@ -115,7 +115,29 @@ class EducoinTransaction(SQLModel, table=True):
       transfer_in   — owner received from counterparty
       award         — discretionary admin grant
       adjustment    — admin correction (rare, audited)
+
+    The ``ux_earn_correlation`` partial unique index backs up the
+    application-level ``_has_earn()`` dedupe check in ``ledger.credit()``.
+    Without it, two concurrent "earn" credits with the same correlation_id
+    (e.g. enrolling into two programs simultaneously → double signup bonus)
+    could both pass the SELECT check and both insert. The index makes the
+    DB reject the second insert; ``credit()`` catches the IntegrityError
+    and returns ``None`` (the same no-op shape as the happy-path dedupe).
     """
+
+    __table_args__ = (
+        Index(
+            "ux_earn_correlation",
+            "owner_type",
+            "owner_id",
+            "correlation_id",
+            unique=True,
+            sqlite_where=text("kind = 'earn' AND correlation_id IS NOT NULL"),
+            postgresql_where=text(
+                "kind = 'earn' AND correlation_id IS NOT NULL"
+            ),
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     # Ledger side.
