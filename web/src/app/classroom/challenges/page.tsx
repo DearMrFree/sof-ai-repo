@@ -172,11 +172,18 @@ export default async function ChallengesPage() {
                       <Clock className="h-3 w-3" />
                       {relativeTime(c.created_at)}
                     </span>
-                    {c.lesson_slug && c.program_slug && (
+                    {c.lesson_slug && (
                       <>
                         <span>·</span>
                         <Link
-                          href={`/learn/${c.program_slug}/${c.lesson_slug}`}
+                          // Historical rows (created before program_slug
+                          // was added to the Challenge model) have
+                          // program_slug = null. Fall back to
+                          // "software-engineer" because it was the only
+                          // program that existed when those rows were
+                          // written — dropping the link silently hides
+                          // real context on the triage board.
+                          href={`/learn/${c.program_slug ?? "software-engineer"}/${c.lesson_slug}`}
                           className="text-indigo-300 hover:underline"
                         >
                           {c.lesson_slug}
