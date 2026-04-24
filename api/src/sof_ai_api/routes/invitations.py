@@ -172,13 +172,29 @@ def create_invitation(
 
     email = _normalize_email(body.email)
 
-    pending_count = len(
+    # Pending-count check. We have to apply the same lazy-expiry treatment
+    # used by list_invitations, otherwise an inviter whose previous 20
+    # invites have all expired (but haven't been read anywhere since)
+    # stays wedged at 409 forever, because their rows still carry
+    # ``status='pending'`` in the DB even though ``expires_at`` is in the
+    # past.
+    pending_rows = list(
         session.exec(
             select(Invitation)
             .where(Invitation.inviter_id == body.inviter_id)
             .where(Invitation.status == "pending")
         ).all()
     )
+    dirty = False
+    for row in pending_rows:
+        before = row.status
+        _maybe_expire_inplace(row)
+        if row.status != before:
+            session.add(row)
+            dirty = True
+    if dirty:
+        session.commit()
+    pending_count = sum(1 for r in pending_rows if r.status == "pending")
     if pending_count >= MAX_PENDING_PER_INVITER:
         raise HTTPException(
             status_code=409,

@@ -191,6 +191,67 @@ def test_status_pending_filter_excludes_lazy_expired() -> None:
     assert stale_id in {i["id"] for i in expired.json()}
 
 
+def test_pending_count_applies_lazy_expiry() -> None:
+    """Regression: expired-but-not-flipped rows must not block new invites.
+
+    Before the fix, create_invitation ran a naive COUNT(*) WHERE
+    status='pending'. If the inviter's previous 20 invites had all passed
+    expires_at but no one had triggered the lazy-expiry branch (via list
+    or token lookup), they'd be wedged at 409 'You already have 20
+    pending invitations' forever.
+    """
+    _reset_rate_limit()
+    # Use a dedicated inviter id so we don't collide with other tests'
+    # pending rows against PRINCIPAL. "freedom" is the other privileged
+    # id allow-listed alongside the email form.
+    inviter = "freedom"
+    _engine = engine
+
+    # Burn through 20 pending invites, then rewind them all to "past-due
+    # but still status=pending" in the DB (simulating the no-one-read-them
+    # path that keeps lazy expiry from running).
+    created_ids: list[int] = []
+    for i in range(20):
+        # Reset every iteration so the 10/day rate limit doesn't trip us
+        # while we're setting up the 20 pending rows — this test is about
+        # the pending-count check, not the rate-limit check.
+        _reset_rate_limit()
+        r = client.post(
+            "/invitations",
+            json={
+                "inviter_id": inviter,
+                "email": f"lazy-pending-{i}@example.com",
+                "role": "contributor",
+            },
+        )
+        assert r.status_code == 200, r.text
+        created_ids.append(r.json()["id"])
+
+    with Session(_engine) as session:
+        for inv_id in created_ids:
+            row = session.exec(
+                select(Invitation).where(Invitation.id == inv_id)
+            ).one()
+            row.expires_at = _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=1)
+            session.add(row)
+        session.commit()
+
+    # Reset the rate bucket so we're not testing two bugs at once.
+    _reset_rate_limit()
+
+    # A brand-new invite should now succeed — the pending-count check has
+    # to lazy-expire the 20 stale rows first.
+    fresh = client.post(
+        "/invitations",
+        json={
+            "inviter_id": inviter,
+            "email": "lazy-pending-fresh@example.com",
+            "role": "contributor",
+        },
+    )
+    assert fresh.status_code == 200, fresh.text
+
+
 def test_duplicate_pending_does_not_consume_rate_slot() -> None:
     """Regression: idempotent dupe lookups must not eat the 24h budget.
 
