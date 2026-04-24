@@ -1,0 +1,58 @@
+#!/bin/sh
+# sof.ai drop-in replacement for pkpofficial's ojs-start.
+#
+# Two fixes on top of upstream:
+#
+#   1. Persist config.inc.php across machine restarts.
+#      Fly Machines have ephemeral rootfs, so /var/www/html/config.inc.php —
+#      which the OJS installer writes to — is lost on every restart, and
+#      ``installed = Off`` reappears. We keep a copy on the Fly volume at
+#      /var/www/files/config.inc.php (the only persistent location) and
+#      restore it into place at boot.
+#
+#   2. Run the install script *after* Apache starts (not from inside
+#      ``ojs-pre-start``, as upstream does). Our ojs-cli-install uses OJS's
+#      own CLI installer (``php tools/install.php``) so this is less
+#      order-sensitive, but keeping the flow consistent with the upstream
+#      shape makes it easier to fall back to browser-based install if ever
+#      needed.
+
+set -e
+
+: "${OJS_CONF:=/var/www/html/config.inc.php}"
+PERSIST="/var/www/files/config.inc.php"
+
+# Restore persisted config before anything looks at OJS_CONF.
+if [ -f "$PERSIST" ]; then
+    echo "[sofai-ojs-start] Restoring config.inc.php from /var/www/files volume..."
+    cp -f "$PERSIST" "$OJS_CONF"
+    chown apache:apache "$OJS_CONF" 2>/dev/null || true
+fi
+
+# Let pre-start handle SERVERNAME + cert generation; suppress its broken
+# install trigger (we run it ourselves below).
+OJS_CLI_INSTALL_DESIRED="${OJS_CLI_INSTALL:-0}"
+OJS_CLI_INSTALL=0 ojs-pre-start
+
+echo "[sofai-ojs-start] Starting cron..."
+/usr/sbin/crond -f &
+
+echo "[sofai-ojs-start] Starting Apache..."
+/usr/sbin/httpd -f /etc/apache2/httpd.conf -DFOREGROUND &
+APACHE_PID=$!
+
+if [ "$OJS_CLI_INSTALL_DESIRED" = "1" ] && grep -q "installed = Off" "$OJS_CONF"; then
+    echo "[sofai-ojs-start] Running CLI install..."
+    if ojs-cli-install; then
+        echo "[sofai-ojs-start] Install succeeded; persisting config to volume."
+        cp -f "$OJS_CONF" "$PERSIST"
+        chmod 600 "$PERSIST"
+    else
+        echo "[sofai-ojs-start] Install failed; Apache still up for manual browser install." >&2
+    fi
+else
+    echo "[sofai-ojs-start] OJS already installed or install not requested; skipping."
+fi
+
+# Foreground Apache for Fly's health checks + graceful shutdown.
+wait $APACHE_PID

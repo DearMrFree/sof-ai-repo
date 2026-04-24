@@ -1,18 +1,14 @@
 # Fly app config for the sof.ai OJS instance.
-# Deploy with:   fly deploy -c ojs-host/fly.toml
 #
-# Prerequisites:
-#   1. `fly apps create sofai-ojs`
-#   2. `fly volumes create ojs_files -a sofai-ojs --size 3 --region iad`
-#   3. Attach a PostgreSQL database (existing Fly PG or a fresh one):
-#      `fly pg attach <pg-app> -a sofai-ojs --database-name ojs`
-#   4. Set the scholarly-files secrets:
-#      `fly secrets set -a sofai-ojs OJS_DB_HOST=... OJS_DB_USER=... OJS_DB_PASSWORD=... OJS_DB_NAME=ojs`
-#   5. `fly deploy -c ojs-host/fly.toml`
+# Prereqs are spelled out in ojs-host/README.md: create the app, provision
+# a 3GB volume, attach a Fly Postgres cluster, and set OJS_DB_HOST /
+# OJS_DB_USER / OJS_DB_PASSWORD / OJS_ADMIN_USER / OJS_ADMIN_PASS /
+# OJS_ADMIN_EMAIL as Fly secrets. Then ``fly deploy -c ojs-host/fly.toml``.
 #
-# Then walk the OJS install wizard at https://sofai-ojs.fly.dev — see
-# ojs-host/README.md for the full recipe including minting the API token
-# that ``sof-ai-api`` uses to federate journals.
+# The image extends pkpofficial/ojs:3_4_0-5 and wires in a postgres-aware
+# CLI installer (see Dockerfile). On first boot the installer POSTs the
+# install form to Apache running on the same machine, so by the time the
+# machine is marked healthy, OJS is fully configured.
 
 app = "sofai-ojs"
 primary_region = "iad"
@@ -21,28 +17,34 @@ primary_region = "iad"
   dockerfile = "Dockerfile"
 
 [env]
-  # OJS_BASE_URL is injected into config.inc.php by the entrypoint.
-  OJS_BASE_URL = "https://sofai-ojs.fly.dev"
+  # Public URL the instance will live at. The OJS install form writes this
+  # into config.inc.php as ``base_url``; everything OJS emits (email links,
+  # OAI repository ID, RSS permalinks) uses it.
+  #
+  # Keep in sync with sof-ai-api's OJS_BASE_URL secret once we set that up.
+  SERVERNAME = "sofai-ojs.fly.dev"
+  # Trigger the (patched) ojs-cli-install on the first boot where
+  # ``installed = Off`` in config.inc.php. Idempotent — re-runs are no-ops
+  # because the first POST flips the flag to ``On``.
+  OJS_CLI_INSTALL = "1"
 
 [http_service]
   internal_port = 80
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
+  # Keep one machine warm so the CLI install doesn't need to race
+  # Fly's cold-start on every deploy.
   min_machines_running = 1
   processes = ["app"]
 
-[[http_service.checks]]
-  grace_period = "30s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/"
+# Fly's HTTP health check requires a 2xx status, but every OJS landing
+# path 302s while the app is healthy (to the default context, or to the
+# language-prefixed home). Skip the HTTP check and let Fly rely on the
+# container's liveness + Apache's TCP socket being open. A dead Apache
+# exits the machine; a running one is routeable.
 
 [[mounts]]
-  # OJS stores scholarly files (uploads, galleys, supplementary data) in
-  # /var/www/files. Mounting a Fly volume means those persist across
-  # deploys and machine restarts.
   source = "ojs_files"
   destination = "/var/www/files"
 

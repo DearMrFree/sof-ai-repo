@@ -1,34 +1,38 @@
 # OJS 3.4 — Fly-hosted companion to sof.ai's Journalism School of AI.
 #
-# We extend the official PKP image (https://hub.docker.com/r/pkpofficial/ojs)
-# and wire it to an external PostgreSQL database (Fly Postgres is a natural
-# fit since we already run one for the sof-ai-api). Scholarly files and
-# uploaded assets live on a persistent Fly volume so a machine restart does
-# not wipe submissions.
+# Extends the official PKP image (https://hub.docker.com/r/pkpofficial/ojs).
+# Two things we overlay:
+#   1. postgresql-client — the upstream image ships MySQL by default, we run
+#      on Fly Postgres.
+#   2. A replacement ``ojs-cli-install`` that:
+#        * supports the ``postgres9`` driver (upstream script hard-codes
+#          ``mysqli``), and
+#        * reads admin credentials from env (upstream hard-codes admin/admin,
+#          which is unacceptable for a public instance).
+#   3. A replacement ``ojs-start`` that runs the install POST *after* Apache
+#      has started accepting connections (upstream calls the install script
+#      in ``ojs-pre-start``, before Apache is up — the install POST hits a
+#      dead port and silently fails). We keep upstream's pre-start for cert
+#      + config-file substitution, just strip its embedded install trigger.
 #
-# Build locally:
-#   docker build -t sofai-ojs ojs-host
-# Deploy to Fly (after `fly apps create sofai-ojs`):
-#   fly deploy -c ojs-host/fly.toml
+# pkpofficial/ojs is Alpine-based, so we use apk (not apt-get).
 
 FROM pkpofficial/ojs:3_4_0-5
 
-# The base image already installs PHP + Apache + OJS. We only overlay:
-#   1. a small entrypoint that templates config.inc.php from env vars
-#      (so secrets stay in Fly secrets, not in the image)
-#   2. PostgreSQL client libs (the base image ships MariaDB by default).
 USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        postgresql-client \
-        gettext-base \
-    && rm -rf /var/lib/apt/lists/*
+# pkpofficial/ojs:3_4_0-5 ships only MySQL PHP extensions; we add php81-pgsql
+# so OJS accepts the ``postgres9`` driver in its install form. Without this,
+# ``InstallForm::getDatabaseDriversOptions()`` silently strips postgres from
+# the driver allowlist and any install POST specifying it fails validation.
+# php81-pgsql gives us the pgsql extension (used by ADOdb), php81-pdo_pgsql
+# gives us the PDO driver (used by OJS 3.4's Illuminate-based migration
+# layer — without it, ``create table`` SQL fails with "could not find driver").
+RUN apk add --no-cache postgresql-client curl php81-pgsql php81-pdo_pgsql
 
-COPY docker-entrypoint.sh /usr/local/bin/sofai-entrypoint.sh
-RUN chmod +x /usr/local/bin/sofai-entrypoint.sh
+COPY ojs-cli-install /usr/local/bin/ojs-cli-install
+COPY ojs-start /usr/local/bin/ojs-start
+RUN chmod +x /usr/local/bin/ojs-cli-install /usr/local/bin/ojs-start
 
-# Re-expose the base image's standard port.
-EXPOSE 80
+EXPOSE 80 443
 
-ENTRYPOINT ["/usr/local/bin/sofai-entrypoint.sh"]
-CMD ["apache2-foreground"]
+# Inherit CMD = ["ojs-start"] from the base image.

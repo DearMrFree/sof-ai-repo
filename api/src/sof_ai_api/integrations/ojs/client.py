@@ -117,8 +117,20 @@ class OJSClient:
 
     def create_context(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create an OJS context (a journal). Returns the OJS response
-        including the new context's id + urlPath."""
-        return self._request("POST", "/api/v1/contexts", json=payload)
+        including the new context's id + urlPath.
+
+        OJS routes site-wide (non-context-scoped) API calls through the
+        synthetic ``/index`` path; hitting ``/api/v1/contexts`` directly
+        collides with Apache's handling of the ``api/`` subdirectory and
+        bypasses the framework bootstrap (500). ``/index/api/v1/...`` always
+        goes through the main ``index.php`` and reaches the router.
+        """
+        return self._request("POST", "/index/api/v1/contexts", json=payload)
+
+    def list_contexts(self) -> dict[str, Any]:
+        """List all OJS contexts. Mainly used by the adapter to map an
+        existing context path back to its numeric id during resync."""
+        return self._request("GET", "/index/api/v1/contexts")
 
     def create_submission(
         self, context_path: str, payload: dict[str, Any]
