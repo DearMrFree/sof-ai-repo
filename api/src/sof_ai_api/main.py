@@ -4,7 +4,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import get_session, init_db
-from .routes import challenges, devin, health, journals, progress, wallet
+from .routes import (
+    challenges,
+    devin,
+    health,
+    invitations,
+    journals,
+    progress,
+    wallet,
+)
+from .seed_brandon import seed as seed_brandon_feedback
+from .seed_invitations import seed as seed_brandon_invitation
 from .seed_journal_ai import seed as seed_journal_ai
 from .settings import settings
 
@@ -24,6 +34,17 @@ async def lifespan(_: FastAPI):
         # pending, missing column). The journal can always be seeded later
         # via the POST /journals/_seed/journal-ai endpoint.
         pass
+    # Seed Brandon Bayquen's LinkedIn feedback as the first public challenge
+    # on the triage board, and mint his invitation so the operator can pull
+    # the accept link out of the startup logs. Both seeds are idempotent
+    # and each is isolated in its own try/except so one failing never
+    # prevents the other (or the app) from coming up.
+    for seed_fn in (seed_brandon_feedback, seed_brandon_invitation):
+        try:
+            with next(get_session()) as session:
+                seed_fn(session)
+        except Exception:
+            pass
     yield
 
 
@@ -48,6 +69,7 @@ app.include_router(devin.router)
 app.include_router(challenges.router)
 app.include_router(wallet.router)
 app.include_router(journals.router)
+app.include_router(invitations.router)
 
 
 @app.get("/")

@@ -304,6 +304,56 @@ class JournalIssue(SQLModel, table=True):
     ojs_sync_error: Optional[str] = Field(default=None)
 
 
+class Invitation(SQLModel, table=True):
+    """An invite handed out to an external human to join sof.ai.
+
+    Created by a principal/instructor via POST /invitations. ``token`` is a
+    cryptographically random url-safe string used in the public accept link
+    ``/invite/<token>``. ``email`` is the invitee's address; when combined
+    with ``status = 'pending'`` it must be unique — the API rejects a
+    duplicate pending invite so an inviter can't spam the same address.
+
+    Expiration is application-enforced (``expires_at``) rather than a DB
+    TTL so expired invites stay on the audit trail with status = 'expired'.
+    """
+
+    __table_args__ = (
+        Index("ix_invitation_token_unique", "token", unique=True),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    inviter_id: str = Field(index=True)  # user_id of the sender, or "system"
+    email: str = Field(index=True)
+    name: Optional[str] = None
+    # "contributor" | "learner" | "reviewer" | "mentor"
+    role: str = Field(default="contributor")
+    message: Optional[str] = None  # personal note from the inviter
+    program_slug: Optional[str] = Field(default=None, index=True)
+    # pending | accepted | expired | revoked
+    status: str = Field(default="pending", index=True)
+    token: str = Field(index=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+    expires_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    accepted_user_id: Optional[str] = Field(default=None, index=True)
+
+
+class ChallengeClaim(SQLModel, table=True):
+    """Who is actively building a challenge.
+
+    One active row per (challenge_id) — enforced by the application layer in
+    the claim route (we don't add a unique constraint on challenge_id alone
+    because released claims stay on the record for audit).
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    challenge_id: int = Field(index=True)
+    claimer_type: str = Field(index=True)  # "user" | "agent"
+    claimer_id: str = Field(index=True)
+    pr_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 

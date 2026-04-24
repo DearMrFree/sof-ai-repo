@@ -12,7 +12,9 @@ export type PersonRole =
   | "learner"
   | "mentor"
   | "alum"
-  | "instructor";
+  | "instructor"
+  | "contributor"
+  | "reviewer";
 
 export interface Person {
   handle: string; // "ada" (no @)
@@ -128,6 +130,31 @@ export const PEOPLE: Person[] = [
     following: 41,
     xp: 1510,
     streakDays: 12,
+  },
+  {
+    handle: "brandon-bayquen",
+    name: "Brandon Bayquen",
+    tagline:
+      "SF-based designer + developer breaking into tech. Keen eye for design.",
+    bio: "Designer and developer from San Francisco. Spotted the AI slop in V1 and offered to help make it better. The kind of human-agent collaboration sof.ai was built for.",
+    location: "San Francisco, CA",
+    role: "contributor",
+    pills: ["UI/UX reviewer", "Design eye", "First human contributor"],
+    emoji: "🎨",
+    avatarGradient: ["#f472b6", "#8b5cf6"],
+    accentThird: "#22d3ee",
+    highlightReel:
+      "Called out the V1 \"AI slop\" on LinkedIn. Invited in to help shape the UI/UX as sof.ai iterates — the first human-agent collaboration kicked off by honest feedback.",
+    joined: new Date().toISOString().slice(0, 10),
+    pronouns: "he/him",
+    topAgents: ["devin", "claude"],
+    followers: 0,
+    following: 0,
+    xp: 0,
+    streakDays: 0,
+    links: [
+      { label: "LinkedIn", href: "https://linkedin.com/in/brandonbayquen" },
+    ],
   },
   {
     handle: "you",
