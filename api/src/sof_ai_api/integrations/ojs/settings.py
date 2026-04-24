@@ -22,19 +22,27 @@ class OJSSettings:
     # If True, mirror failures raise (useful in tests). In production we
     # swallow them so a flaky OJS doesn't block a sof.ai write.
     strict: bool
+    # Direct OJS Postgres DSN. OJS 3.4's REST API does not expose a
+    # sections-list endpoint, so ``mirror_journal`` falls back to a one-shot
+    # ``SELECT section_id FROM sections WHERE journal_id = %s`` to discover
+    # the default section for the new context. When ``None``, the adapter
+    # skips the lookup and ``mirror_article`` will fail cleanly with a
+    # "sectionId unknown" error that operators can triage in ojs_sync_error.
+    db_url: Optional[str]
 
 
 def ojs_settings() -> OJSSettings:
     """Read settings from the environment at call time.
 
     Intentionally *not* cached — tests monkey-patch env vars per case, and
-    the cost of reading four os.environ lookups is nothing.
+    the cost of reading a handful of os.environ lookups is nothing.
     """
     return OJSSettings(
         base_url=os.environ.get("OJS_BASE_URL") or None,
         api_token=os.environ.get("OJS_API_TOKEN") or None,
         timeout_s=float(os.environ.get("OJS_TIMEOUT_S") or "10"),
         strict=(os.environ.get("OJS_STRICT") or "").lower() in ("1", "true", "yes"),
+        db_url=os.environ.get("OJS_DB_URL") or None,
     )
 
 

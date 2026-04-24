@@ -135,9 +135,37 @@ class OJSClient:
     def create_submission(
         self, context_path: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        """Create a submission inside a given context."""
+        """Create a submission inside a given context.
+
+        OJS 3.4 rejects any POST body that tries to set ``submissionProgress``
+        (that field is managed by the workflow, not the caller), and requires
+        ``sectionId`` + ``locale``. The POST returns a near-empty submission;
+        title/abstract/authors are set on the child publication via
+        ``update_publication``.
+        """
         return self._request(
             "POST", f"/{context_path}/api/v1/submissions", json=payload
+        )
+
+    def update_publication(
+        self,
+        context_path: str,
+        submission_id: int,
+        publication_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """PUT metadata onto a publication.
+
+        OJS submissions are two-phase: ``POST /submissions`` creates an empty
+        submission with one child publication (id returned in the response),
+        then ``PUT /submissions/{sid}/publications/{pid}`` sets everything the
+        reader actually cares about — title, abstract, keywords, etc.
+        """
+        return self._request(
+            "PUT",
+            f"/{context_path}/api/v1/submissions/"
+            f"{submission_id}/publications/{publication_id}",
+            json=payload,
         )
 
     def create_review_assignment(

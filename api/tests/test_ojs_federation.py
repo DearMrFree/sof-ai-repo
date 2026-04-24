@@ -63,7 +63,29 @@ class FakeOJSClient:
         self._maybe_fail("create_submission")
         sid = self.next_submission_id
         self.next_submission_id += 1
-        return {"id": sid}
+        # OJS 3.4 always returns a single child publication on create;
+        # the real client relies on this id for the follow-up PUT.
+        pid = sid + 900
+        return {"id": sid, "publications": [{"id": pid}]}
+
+    def update_publication(
+        self,
+        context_path: str,
+        submission_id: int,
+        publication_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "update_publication",
+                context_path,
+                submission_id,
+                publication_id,
+                payload,
+            )
+        )
+        self._maybe_fail("update_publication")
+        return {"id": publication_id, **payload}
 
     def create_review_assignment(
         self, context_path: str, payload: dict[str, Any]
@@ -97,10 +119,21 @@ class FakeOJSClient:
 
 
 def _enable_ojs(monkeypatch, fake: FakeOJSClient) -> None:
-    """Flip the OJS feature flag on for this test and wire the fake client."""
+    """Flip the OJS feature flag on for this test and wire the fake client.
+
+    Also stubs ``_lookup_default_section_id`` to return a deterministic
+    value so tests don't hit Postgres — the real lookup runs over
+    ``OJS_DB_URL`` against the live OJS cluster and is out of scope for
+    unit tests.
+    """
     monkeypatch.setenv("OJS_BASE_URL", "https://ojs.sof.ai")
     monkeypatch.setenv("OJS_API_TOKEN", "fake-test-token")
     monkeypatch.setattr(adapter, "_client", lambda: fake)
+    monkeypatch.setattr(
+        adapter,
+        "_lookup_default_section_id",
+        lambda context_id: (context_id or 0) + 1000,
+    )
 
 
 def _insert_journal(session: Session, slug: str, eic: str = "u-eic") -> Journal:
@@ -210,9 +243,23 @@ def test_mirror_article_chains_through_journal(monkeypatch) -> None:
         assert a.ojs_submission_id == 101
         assert a.ojs_synced_at is not None
 
-        # Call order: context first, then submission.
+        # Call order: context first, then submission, then the publication
+        # PUT that sets title + abstract (OJS 3.4 submissions are two-phase).
         methods = [c[0] for c in fake.calls]
-        assert methods == ["create_context", "create_submission"]
+        assert methods == [
+            "create_context",
+            "create_submission",
+            "update_publication",
+        ]
+
+        # The PUT body must carry the real title + abstract — if we ever
+        # regress to sending them on ``create_submission`` we'd silently
+        # create empty-titled papers in OJS.
+        pub_call = next(c for c in fake.calls if c[0] == "update_publication")
+        _, _, sid, pid, payload = pub_call
+        assert sid == 101
+        assert pid == 1001  # fake: pid = sid + 900
+        assert payload["title"] == {"en": "Chain test article"}
 
 
 def test_resync_pending_backfills_every_row(monkeypatch) -> None:
