@@ -22,7 +22,7 @@ set -e
 
 adm_user="${OJS_ADMIN_USER:-admin}"
 adm_pass="${OJS_ADMIN_PASS:-admin}"
-adm_email="${OJS_ADMIN_EMAIL:-admin@${SERVERNAME}.org}"
+adm_email="${OJS_ADMIN_EMAIL:-admin@${SERVERNAME}}"
 
 echo "[sofai-ojs-install] Running php tools/install.php (admin=${adm_user})..."
 
