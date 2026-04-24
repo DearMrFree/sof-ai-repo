@@ -396,6 +396,101 @@ def test_resync_pending_backfills_every_row(monkeypatch) -> None:
         assert still_pending.ojs_context_path == "resync-test"
 
 
+def test_mirror_article_resumes_phase_two_without_duplicate_phase_one(
+    monkeypatch,
+) -> None:
+    """Phase-2 (update_publication) failure must leave the row recoverable
+    via resync. The next mirror_article call skips Phase 1 (no second
+    create_submission — which would leak a duplicate OJS submission) and
+    retries Phase 2 using the persisted ojs_publication_id.
+    """
+    fake = FakeOJSClient()
+    fake.fail_once_on = "update_publication"
+    _enable_ojs(monkeypatch, fake)
+
+    with Session(engine) as s:
+        j = _insert_journal(s, slug="phase2-retry-test")
+        a = JournalArticle(
+            journal_slug=j.slug,
+            title="Phase 2 retry",
+            abstract="abstract body",
+            body="body",
+            submitter_type="user",
+            submitter_id="u-a",
+        )
+        s.add(a)
+        s.commit()
+        s.refresh(a)
+
+        # First attempt: Phase 1 succeeds, Phase 2 raises.
+        assert adapter.mirror_article(s, a.id or 0) is False
+        s.refresh(a)
+        assert a.ojs_submission_id == 101
+        assert a.ojs_publication_id == 1001  # fake: pid = sid + 900
+        assert a.ojs_synced_at is None
+        assert a.ojs_sync_error is not None
+        assert "simulated update_publication failure" in (a.ojs_sync_error or "")
+
+        # Resync must pick this row up via the publish-phase filter
+        # (ojs_synced_at IS NULL OR ojs_sync_error IS NOT NULL), not the
+        # create-phase filter (ojs_submission_id IS NULL) — which would
+        # miss it since Phase 1 already committed the id.
+        result = adapter.resync_pending(s)
+        assert result["articles"] >= 1
+
+        s.refresh(a)
+        assert a.ojs_submission_id == 101  # unchanged — no second create
+        assert a.ojs_publication_id == 1001
+        assert a.ojs_synced_at is not None
+        assert a.ojs_sync_error is None
+
+        # Bookkeeping: create_submission called exactly once across both
+        # attempts; update_publication called twice (first raised,
+        # second succeeded) — this is the regression guard.
+        create_calls = [c for c in fake.calls if c[0] == "create_submission"]
+        update_calls = [c for c in fake.calls if c[0] == "update_publication"]
+        assert len(create_calls) == 1
+        assert len(update_calls) == 2
+
+
+def test_resync_pending_backfills_journal_missing_section_id(monkeypatch) -> None:
+    """A journal mirrored before OJS_DB_URL was set (or where the section
+    lookup transiently failed) has ojs_context_path set but
+    ojs_default_section_id still NULL. ``resync_pending`` must pick it
+    up — the original create-phase filter (ojs_context_path IS NULL)
+    missed these rows and left them permanently un-healable.
+    """
+    fake = FakeOJSClient()
+    _enable_ojs(monkeypatch, fake)
+
+    with Session(engine) as s:
+        j = _insert_journal(s, slug="section-backfill-test")
+        # Simulate "context already in OJS, section lookup never ran":
+        # write straight into the row the way a before-OJS_DB_URL
+        # mirror would have left it.
+        j.ojs_context_path = j.slug
+        j.ojs_context_id = 777
+        j.ojs_default_section_id = None
+        s.add(j)
+        s.commit()
+        s.refresh(j)
+
+        # resync_pending must pick this up and backfill the section id.
+        result = adapter.resync_pending(s)
+        assert result["journals"] >= 1
+
+        s.refresh(j)
+        # _enable_ojs stubs _lookup_default_section_id to return
+        # context_id + 1000, so 777 + 1000 = 1777.
+        assert j.ojs_default_section_id == 1777
+        assert j.ojs_sync_error is None
+
+        # The context was already in OJS, so no second create_context
+        # call must have happened — backfill is strictly section-id only.
+        ctx_calls = [c for c in fake.calls if c[0] == "create_context"]
+        assert len(ctx_calls) == 0
+
+
 def test_mirror_issue_retries_after_db_failure(monkeypatch) -> None:
     """Atomic direct-DB mirror_issue: on transient DB failure the row must
     stay un-synced (``ojs_issue_id IS NULL``) so resync picks it up again

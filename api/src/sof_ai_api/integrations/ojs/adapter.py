@@ -405,13 +405,42 @@ def mirror_journal(session: Session, journal_id: int) -> bool:
 
 
 def mirror_article(session: Session, article_id: int) -> bool:  # noqa: PLR0911, PLR0912
-    # The guard returns are load-bearing: flag-off, missing row, already-
-    # synced, missing parent journal, failed parent mirror, OJS call
-    # failed, and OJS returned no id are all distinct "bail early" paths.
+    """Mirror a sof.ai article to OJS in two phases: create + publish.
+
+    OJS 3.4 submissions are two-phase: POST /submissions creates an
+    empty row with one child publication, then PUT /publications/{pid}
+    sets title/abstract. Each phase is independently retry-safe:
+
+    * Phase 1 (create): runs only while ``ojs_submission_id`` is NULL.
+      On failure we record the error and bail; resync picks the row up
+      again because ``ojs_synced_at`` is still NULL.
+    * Phase 2 (publish): runs whenever the row has a submission id but
+      is not yet fully synced. The publication id is persisted alongside
+      the submission id on Phase 1 success so Phase 2 can resume without
+      hitting OJS again to re-fetch it. On Phase-2 failure we keep both
+      ids and re-record the error; the next resync picks the row up via
+      its publish-phase filter (``ojs_synced_at IS NULL OR
+      ojs_sync_error IS NOT NULL``) and calls mirror_article again —
+      which then skips Phase 1 because ``ojs_submission_id`` is set.
+
+    A fully-mirrored row has ``ojs_submission_id IS NOT NULL`` **and**
+    ``ojs_publication_id IS NOT NULL`` **and** ``ojs_synced_at IS NOT
+    NULL`` **and** ``ojs_sync_error IS NULL``.
+    """
     if not ojs_enabled():
         return False
     a = session.get(JournalArticle, article_id)
-    if a is None or a.ojs_submission_id is not None:
+    if a is None:
+        return False
+    # Fully synced — idempotent no-op. The idempotency guard is
+    # deliberately stricter than "submission id is set": a row that
+    # landed Phase 1 but crashed on Phase 2 still needs mirror_article
+    # to re-enter (skipping Phase 1) to finish the job.
+    if (
+        a.ojs_submission_id is not None
+        and a.ojs_synced_at is not None
+        and not a.ojs_sync_error
+    ):
         return False
 
     # Make sure the parent context exists in OJS first and that we know
@@ -437,67 +466,84 @@ def mirror_article(session: Session, article_id: int) -> bool:  # noqa: PLR0911,
         )
         return False
 
-    # --- Phase 1: create the empty submission. -----------------------------
+    # --- Phase 1: create the empty submission (only when not already done).
     # OJS 3.4 rejects any POST that tries to set title/abstract/
     # submissionProgress at creation time — those live on the child
     # publication, which is the next call. We also MUST pass sectionId +
     # locale; everything else is managed by the workflow.
-    try:
-        resp = _client().create_submission(
-            j.ojs_context_path,
-            {
-                "locale": "en",
-                "sectionId": j.ojs_default_section_id,
-            },
-        )
-    except OJSError as exc:
-        _record_error(a, session, exc)
-        return False
+    if a.ojs_submission_id is None:
+        try:
+            resp = _client().create_submission(
+                j.ojs_context_path,
+                {
+                    "locale": "en",
+                    "sectionId": j.ojs_default_section_id,
+                },
+            )
+        except OJSError as exc:
+            _record_error(a, session, exc)
+            return False
 
-    raw_id = resp.get("id")
-    if not isinstance(raw_id, int):
-        # Never mark synced without an id. If we did, `ojs_submission_id`
-        # would be NULL but `ojs_synced_at` would be set, and the next
-        # resync_pending call would re-submit via the `is_(None)` filter
-        # (plus the idempotency guard in mirror_article would not skip
-        # it either) — silently creating a duplicate OJS submission.
+        raw_id = resp.get("id")
+        if not isinstance(raw_id, int):
+            # Never mark synced without an id. If we did, `ojs_submission_id`
+            # would be NULL but `ojs_synced_at` would be set, and the next
+            # resync_pending call would re-submit via the publish-phase
+            # filter — silently creating a duplicate OJS submission.
+            _record_error(
+                a, session,
+                OJSError("OJS create_submission did not return an id"),
+            )
+            return False
+
+        # Pull the just-created publication id off the response. Every
+        # fresh submission ships with exactly one publication. Persist
+        # BOTH ids before attempting the publication PUT so a crash in
+        # Phase 2 can resume cleanly from this row without re-entering
+        # Phase 1 (which would leak a second OJS submission).
+        pub_id: Optional[int] = None
+        for pub in resp.get("publications") or []:
+            if isinstance(pub, dict):
+                pid = pub.get("id")
+                if isinstance(pid, int):
+                    pub_id = pid
+                    break
+        a.ojs_submission_id = raw_id
+        a.ojs_publication_id = pub_id
+        session.add(a)
+        session.commit()
+
+        if pub_id is None:
+            _record_error(
+                a, session,
+                OJSError(
+                    "OJS create_submission returned no publications[]. "
+                    "Phase 2 cannot resume without a publication id; "
+                    "manual intervention required (inspect OJS submissions "
+                    f"#{raw_id} and populate ojs_publication_id by hand)."
+                ),
+            )
+            return False
+
+    # --- Phase 2: PUT title/abstract/coverage on the publication. --------
+    # Re-read the persisted ids so we always use the stored values (the
+    # row may have been reloaded between Phase 1 and Phase 2 on a retry).
+    submission_id = a.ojs_submission_id
+    publication_id = a.ojs_publication_id
+    if submission_id is None or publication_id is None:
+        # Defensive: can only happen if the row is mid-mutation in another
+        # process. Record the error + bail; the publish-phase filter in
+        # resync_pending will pick it up again.
         _record_error(
-            a, session, OJSError("OJS create_submission did not return an id")
+            a, session,
+            OJSError("OJS submission/publication id missing before Phase 2"),
         )
         return False
-
-    # Pull the just-created publication id off the response. Every fresh
-    # submission ships with exactly one publication. We persist the
-    # submission id *before* attempting the publication PUT so a crash in
-    # phase 2 doesn't leak an invisible duplicate on the next resync.
-    pub_id: Optional[int] = None
-    for pub in resp.get("publications") or []:
-        if isinstance(pub, dict):
-            pid = pub.get("id")
-            if isinstance(pid, int):
-                pub_id = pid
-                break
-    a.ojs_submission_id = raw_id
-    session.add(a)
-    session.commit()
-
-    if pub_id is None:
-        _record_error(
-            a,
-            session,
-            OJSError(
-                "OJS create_submission returned no publications[] — cannot "
-                "write title/abstract; manual intervention required."
-            ),
-        )
-        return False
-
-    # --- Phase 2: set title/abstract on the publication. -------------------
     try:
         _client().update_publication(
             j.ojs_context_path,
-            raw_id,
-            pub_id,
+            submission_id,
+            publication_id,
             {
                 "title": {"en": a.title},
                 "abstract": {"en": a.abstract},
@@ -693,16 +739,30 @@ def resync_pending(session: Session) -> dict[str, int]:
     reviews = 0
     issues = 0
 
+    # Journals: pick up both never-mirrored rows AND rows that are
+    # partially mirrored (context created but default section id not yet
+    # cached — possible when the initial mirror_journal ran before
+    # OJS_DB_URL was configured, or when the lookup transiently failed).
     j_rows = session.exec(
-        select(Journal).where(Journal.ojs_context_path.is_(None))  # type: ignore[union-attr]
+        select(Journal).where(
+            (Journal.ojs_context_path.is_(None))  # type: ignore[union-attr]
+            | (Journal.ojs_default_section_id.is_(None))  # type: ignore[union-attr]
+            | (Journal.ojs_sync_error.is_not(None))  # type: ignore[union-attr]
+        )
     ).all()
     for j in j_rows:
         if j.id and mirror_journal(session, j.id):
             journals += 1
 
+    # Articles: pick up never-mirrored rows AND rows that completed Phase
+    # 1 (submission id set) but failed Phase 2 (synced_at still NULL, or
+    # a persisted sync_error). mirror_article handles the skip-Phase-1
+    # branch using the stored ojs_submission_id + ojs_publication_id.
     a_rows = session.exec(
         select(JournalArticle).where(
-            JournalArticle.ojs_submission_id.is_(None)  # type: ignore[union-attr]
+            (JournalArticle.ojs_submission_id.is_(None))  # type: ignore[union-attr]
+            | (JournalArticle.ojs_synced_at.is_(None))  # type: ignore[union-attr]
+            | (JournalArticle.ojs_sync_error.is_not(None))  # type: ignore[union-attr]
         )
     ).all()
     for a in a_rows:
