@@ -234,6 +234,12 @@ def list_invitations(
             dirty = True
     if dirty:
         session.commit()
+    # If the caller filtered by status, drop rows whose status changed
+    # after lazy expiry so the response honours the requested filter —
+    # e.g. `?status=pending` must not return rows we just flipped to
+    # 'expired' a few lines above.
+    if status is not None:
+        rows = [r for r in rows if r.status == status]
     return rows
 
 

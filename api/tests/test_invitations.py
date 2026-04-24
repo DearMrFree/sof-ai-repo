@@ -1,9 +1,13 @@
 """Tests for the invitation system."""
 
-from fastapi.testclient import TestClient
+import datetime as _dt
 
-from sof_ai_api.db import init_db
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
+from sof_ai_api.db import engine, init_db
 from sof_ai_api.main import app
+from sof_ai_api.models import Invitation
 from sof_ai_api.routes import invitations as invitations_routes
 
 init_db()
@@ -127,6 +131,64 @@ def test_revoke_invitation() -> None:
         json={"accepted_user_id": "someone"},
     )
     assert accept.status_code == 410
+
+
+def test_status_pending_filter_excludes_lazy_expired() -> None:
+    """Regression: ?status=pending must not leak rows that lazy-expired.
+
+    Before the fix, list_invitations ran the ``WHERE status='pending'``
+    query, then walked the returned rows and flipped any past-due ones to
+    ``expired`` in place — but kept them in the response. Callers asked
+    for pending and got back expired, which broke the ``/classroom/invite``
+    page and any other UI that trusted the filter.
+    """
+    _reset_rate_limit()
+    # Create one valid pending invite.
+    r = client.post(
+        "/invitations",
+        json={
+            "inviter_id": PRINCIPAL,
+            "email": "pending-live@example.com",
+            "role": "contributor",
+        },
+    )
+    assert r.status_code == 200
+
+    # Mint a second one and then rewind its expires_at directly in the DB
+    # so the lazy-expiry branch fires on the next list call.
+    r2 = client.post(
+        "/invitations",
+        json={
+            "inviter_id": PRINCIPAL,
+            "email": "pending-stale@example.com",
+            "role": "contributor",
+        },
+    )
+    assert r2.status_code == 200
+    stale_id = r2.json()["id"]
+    with Session(engine) as session:
+        row = session.exec(
+            select(Invitation).where(Invitation.id == stale_id)
+        ).one()
+        row.expires_at = _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=1)
+        session.add(row)
+        session.commit()
+
+    pending = client.get(
+        "/invitations", params={"inviter_id": PRINCIPAL, "status": "pending"}
+    )
+    assert pending.status_code == 200
+    pending_ids = {i["id"] for i in pending.json()}
+    assert stale_id not in pending_ids, (
+        "Stale row lazy-expired but still leaked into status=pending"
+    )
+
+    # And ?status=expired picks it up.
+    expired = client.get(
+        "/invitations", params={"inviter_id": PRINCIPAL, "status": "expired"}
+    )
+    assert expired.status_code == 200
+    assert stale_id in {i["id"] for i in expired.json()}
 
 
 def test_duplicate_pending_invite_returns_existing() -> None:
