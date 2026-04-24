@@ -15,6 +15,7 @@ import re
 import threading
 from collections import deque
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -148,6 +149,31 @@ class ClaimChallengeRequest(BaseModel):
     claimer_type: str = Field(..., min_length=1, max_length=20)  # "user" | "agent"
     claimer_id: str = Field(..., min_length=1, max_length=120)
     pr_url: str | None = Field(default=None, max_length=500)
+
+    @field_validator("pr_url")
+    @classmethod
+    def _validate_pr_url(cls, v: str | None) -> str | None:
+        """Defence-in-depth: only allow http(s) URLs with a host.
+
+        The triage board renders ``new URL(pr_url).pathname`` in a server
+        component. A malformed-but-http-prefixed string (e.g. ``"https://"``
+        or ``"http://[oops"``) would crash that page's SSR for every viewer,
+        so we reject it here and let a 422 land on the writer instead.
+        """
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        lowered = v.lower()
+        if not (lowered.startswith("http://") or lowered.startswith("https://")):
+            raise ValueError("pr_url must be an http(s) URL")
+        # Stdlib's urlparse is lenient; use urlsplit + require a hostname so
+        # a "https://" with no host is rejected.
+        parts = urlsplit(v)
+        if not parts.netloc or not parts.hostname:
+            raise ValueError("pr_url must include a host")
+        return v
 
 
 @router.post("", response_model=Challenge)

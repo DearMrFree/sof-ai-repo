@@ -69,17 +69,29 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _rate_ok(inviter_id: str) -> bool:
+def _rate_would_allow(inviter_id: str) -> bool:
+    """Non-mutating check: is this inviter currently under the 24h limit?
+
+    Separate from the record call so we can reject idempotent no-ops (the
+    dupe/over-pending paths) without consuming a rate-limit slot — and
+    more importantly so a double-submit from the UI doesn't chew through
+    the daily budget on replayed requests.
+    """
     now = _utcnow()
     cutoff = now - RATE_LIMIT_WINDOW
     with _rate_lock:
         q = _rate.setdefault(inviter_id, deque())
         while q and q[0] < cutoff:
             q.popleft()
-        if len(q) >= RATE_LIMIT_PER_DAY:
-            return False
-        q.append(now)
-        return True
+        return len(q) < RATE_LIMIT_PER_DAY
+
+
+def _rate_record(inviter_id: str) -> None:
+    """Record a rate-limit hit. Call AFTER we know an invitation will be
+    minted (i.e. after the dupe + pending-count checks have passed)."""
+    now = _utcnow()
+    with _rate_lock:
+        _rate.setdefault(inviter_id, deque()).append(now)
 
 
 def _normalize_email(raw: str) -> str:
@@ -148,7 +160,11 @@ def create_invitation(
             status_code=400,
             detail=f"role must be one of {sorted(ALLOWED_ROLES)}",
         )
-    if not _rate_ok(body.inviter_id):
+    # Peek at the rate limit up front so a clearly-over-budget caller gets
+    # a fast 429 before we touch the DB. We do NOT consume the slot here —
+    # the actual record happens right before commit, so idempotent no-ops
+    # (returning an existing dupe) don't eat the budget.
+    if not _rate_would_allow(body.inviter_id):
         raise HTTPException(
             status_code=429,
             detail="Invitation rate limit hit. Try again tomorrow.",
@@ -179,12 +195,17 @@ def create_invitation(
     ).first()
     if dupe is not None:
         # Return the existing pending invite rather than minting a new one —
-        # callers that re-run the seed get the stable token back.
+        # callers that re-run the seed get the stable token back. Crucially,
+        # we do not record a rate-limit hit here: this path creates nothing.
         _maybe_expire_inplace(dupe)
         if dupe.status == "pending":
             return dupe
         # Fell through to expired — allow creating a fresh one.
         session.add(dupe)
+
+    # At this point we're definitely minting a new invitation — record the
+    # rate-limit hit now so the 24h budget only counts real writes.
+    _rate_record(body.inviter_id)
 
     invitation = Invitation(
         inviter_id=body.inviter_id,

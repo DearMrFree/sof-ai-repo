@@ -82,6 +82,24 @@ def test_cannot_claim_shipped() -> None:
     assert r.status_code == 409
 
 
+def test_malformed_pr_url_rejected() -> None:
+    """Regression: a malformed-but-http-prefixed pr_url crashed the
+    /classroom/challenges SSR via `new URL(pr_url).pathname`. Reject at
+    the API so bad rows never hit the DB."""
+    cid = _create("bad pr url", "idea", "u-claim-prurl-1")
+    _triage(cid)
+    for bad in ["https://", "http://", "https://[oops", "not-a-url"]:
+        r = client.post(
+            f"/challenges/{cid}/claim",
+            json={
+                "claimer_type": "agent",
+                "claimer_id": "devin",
+                "pr_url": bad,
+            },
+        )
+        assert r.status_code == 422, f"accepted bad pr_url: {bad!r}"
+
+
 def test_bad_claimer_type_rejected() -> None:
     cid = _create("bad type", "idea", "u-claim-badtype-1")
     _triage(cid)

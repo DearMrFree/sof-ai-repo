@@ -78,6 +78,23 @@ function isSafeHttpUrl(s: string | null): s is string {
   return lower.startsWith("http://") || lower.startsWith("https://");
 }
 
+/**
+ * Parse a URL safely for render purposes.
+ *
+ * `new URL(...)` throws `TypeError: Invalid URL` on malformed-but-
+ * http-prefixed strings like ``"https://"`` or ``"http://[oops"``. We
+ * render inside a server component, so a single bad pr_url in the DB
+ * would crash the entire /classroom/challenges page for all users.
+ * Fall back to showing the raw string if parsing fails.
+ */
+function safeUrlPathname(s: string): string {
+  try {
+    return new URL(s).pathname;
+  } catch {
+    return s;
+  }
+}
+
 async function fetchChallenges(): Promise<Challenge[]> {
   try {
     const res = await fetch(`${getApiBaseUrl()}/challenges`, {
@@ -278,7 +295,7 @@ export default async function ChallengesPage() {
                                 className="inline-flex items-center gap-1 text-indigo-300 hover:underline"
                               >
                                 <GitPullRequestArrow className="h-3 w-3" />
-                                {new URL(claim.pr_url).pathname}
+                                {safeUrlPathname(claim.pr_url)}
                               </a>
                             ) : (
                               <span className="text-zinc-500">

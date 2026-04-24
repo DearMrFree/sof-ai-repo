@@ -191,6 +191,47 @@ def test_status_pending_filter_excludes_lazy_expired() -> None:
     assert stale_id in {i["id"] for i in expired.json()}
 
 
+def test_duplicate_pending_does_not_consume_rate_slot() -> None:
+    """Regression: idempotent dupe lookups must not eat the 24h budget.
+
+    Before the fix, _rate_ok was called up front and recorded a hit even
+    when the request resolved to 'return the existing pending invite'.
+    A page refresh or double-click would therefore burn slots for nothing.
+    """
+    _reset_rate_limit()
+    first = client.post(
+        "/invitations",
+        json={
+            "inviter_id": PRINCIPAL,
+            "email": "rate-dupe@example.com",
+            "role": "contributor",
+        },
+    )
+    assert first.status_code == 200
+    # Replay the same create many more times than the 10/day limit allows.
+    for _ in range(15):
+        again = client.post(
+            "/invitations",
+            json={
+                "inviter_id": PRINCIPAL,
+                "email": "rate-dupe@example.com",
+                "role": "contributor",
+            },
+        )
+        assert again.status_code == 200
+        assert again.json()["id"] == first.json()["id"]
+    # Brand-new invite still fits under the 10/day ceiling.
+    fresh = client.post(
+        "/invitations",
+        json={
+            "inviter_id": PRINCIPAL,
+            "email": "rate-dupe-fresh@example.com",
+            "role": "contributor",
+        },
+    )
+    assert fresh.status_code == 200, fresh.text
+
+
 def test_duplicate_pending_invite_returns_existing() -> None:
     _reset_rate_limit()
     r1 = client.post(
