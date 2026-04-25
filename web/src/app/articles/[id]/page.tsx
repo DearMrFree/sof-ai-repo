@@ -9,6 +9,11 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { ApproveArticleButton } from "@/components/ApproveArticleButton";
+import { RunReviewChainButton } from "@/components/RunReviewChainButton";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+
+const APPROVER_EMAIL = "freedom@thevrschool.org";
 
 export const dynamic = "force-dynamic";
 
@@ -92,12 +97,34 @@ export default async function ArticleDetailPage({
 }: {
   params: { id: string };
 }) {
-  const article = await fetchArticle(params.id);
+  const [article, session] = await Promise.all([
+    fetchArticle(params.id),
+    getServerSession(authOptions),
+  ]);
   if (!article) notFound();
+
+  const sessionUser = session?.user as { email?: string } | undefined;
+  const isFreedom =
+    (sessionUser?.email ?? "").trim().toLowerCase() === APPROVER_EMAIL;
 
   const currentIdx = PIPELINE_ORDER.indexOf(
     article.pipeline_phase as (typeof PIPELINE_ORDER)[number],
   );
+
+  // The "Run review chain" button shows when the article is in any phase
+  // *between* drafted and awaiting_approval (inclusive of drafted, exclusive
+  // of awaiting_approval). Only Dr. Cheteni sees it; the underlying API
+  // also enforces the same gate.
+  const canRunPipeline =
+    isFreedom &&
+    [
+      "drafted",
+      "claude_review_1",
+      "devin_review_1",
+      "claude_review_2",
+      "gemini_review",
+      "devin_final",
+    ].includes(article.pipeline_phase);
 
   return (
     <main className="mx-auto max-w-4xl px-4 pb-24 pt-10">
@@ -166,6 +193,24 @@ export default async function ArticleDetailPage({
           })}
         </ol>
       </section>
+
+      {/* Run-pipeline gate (Freedom-only) */}
+      {canRunPipeline && (
+        <section className="mt-8 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+          <h2 className="text-lg font-semibold text-emerald-100">
+            Drive the review chain
+          </h2>
+          <p className="mt-2 text-sm text-emerald-200/80">
+            One click runs the article through Claude → Devin → Claude →
+            Gemini → Devin in sequence and lands it at{" "}
+            <code>awaiting_approval</code>. Burns ~5 model calls; takes
+            ~60s.
+          </p>
+          <div className="mt-4">
+            <RunReviewChainButton articleId={article.id} />
+          </div>
+        </section>
+      )}
 
       {/* Approve gate */}
       {article.pipeline_phase === "awaiting_approval" && (
