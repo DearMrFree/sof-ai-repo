@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Agent,
@@ -73,12 +73,26 @@ export function AgentChat({ agent }: { agent: Agent }) {
   const [devinError, setDevinError] = useState<string | null>(null);
   const [devinSession, setDevinSession] = useState<DevinSession | null>(null);
   const [coworkMode, setCoworkMode] = useState(false);
+  // Living-Article Pipeline (PR #10): every Devin chat that crosses the
+  // 3-turn threshold auto-spawns a draft article. The session id is stable
+  // per component mount so refreshes start a new article, retries during
+  // the same mount don't.
+  const sessionId = useMemo(
+    () =>
+      `chat-${agent.id}-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Date.now().toString(36)}`,
+    [agent.id],
+  );
+  const [articleId, setArticleId] = useState<number | null>(null);
+  const [articleStarting, setArticleStarting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const canUpload = agentHasCapability(agent, "file_analysis");
   const canKickoffDevin = agentHasCapability(agent, "devin_kickoff");
   const canCowork = agentHasCapability(agent, "cowork");
+  // Only Devin chats spawn Living Articles. Other agents (Claude, Gemini)
+  // are *reviewers* in the pipeline; they don't co-author the article.
+  const canAutoArticle = agent.id === "devin";
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -86,6 +100,67 @@ export function AgentChat({ agent }: { agent: Agent }) {
       behavior: "smooth",
     });
   }, [messages, loading]);
+
+  // Auto-trigger Living-Article Pipeline once the user has sent more than
+  // 3 messages on a Devin chat. We count *user* turns (not total) so the
+  // assistant's intro greeting doesn't count toward the threshold. Guarded
+  // by ``articleId`` and ``articleStarting`` so duplicate inserts can
+  // never happen even under StrictMode double-invocation.
+  useEffect(() => {
+    if (!canAutoArticle) return;
+    if (articleId || articleStarting) return;
+    const userTurns = messages.filter((m) => m.role === "user").length;
+    if (userTurns < 3) return;
+
+    setArticleStarting(true);
+    const transcript = messages
+      .filter((m) => m.content.trim().length > 0)
+      .map((m) => ({ role: m.role, content: m.content }));
+    fetch("/api/articles/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        agentId: agent.id,
+        transcript,
+        titleHint: `Devin co-work session — ${transcript[0]?.content.slice(0, 60) ?? "untitled"}`,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          // Silently swallow 401 (anonymous user) — the pipeline only
+          // activates for signed-in users. Other errors land in the
+          // browser console for diagnostics but never break the chat.
+          if (res.status !== 401) {
+            console.warn(
+              "articles/start failed",
+              res.status,
+              await res.text(),
+            );
+          }
+          return null;
+        }
+        return (await res.json()) as { id?: number };
+      })
+      .then((data) => {
+        if (data && typeof data.id === "number") {
+          setArticleId(data.id);
+        }
+      })
+      .catch((err) => {
+        console.warn("articles/start error", err);
+      })
+      .finally(() => {
+        setArticleStarting(false);
+      });
+  }, [
+    canAutoArticle,
+    articleId,
+    articleStarting,
+    messages,
+    agent.id,
+    sessionId,
+  ]);
 
   async function uploadFile(file: File) {
     setUploading(true);

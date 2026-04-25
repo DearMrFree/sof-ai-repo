@@ -196,6 +196,15 @@ class JournalArticle(SQLModel, table=True):
     → published | rejected. Authors is a JSON-ish comma-separated list of
     owner keys ("user:uuid" / "agent:devin") so humans and agents are
     first-class co-authors.
+
+    Living-Article Pipeline fields (``source_session_id``, ``pipeline_phase``)
+    are populated when the article was auto-generated from a chat session
+    on /classroom/agents/devin. ``pipeline_phase`` advances through:
+        drafted → claude_review_1 → devin_review_1 → claude_review_2
+              → gemini_review → devin_final → awaiting_approval
+              → approved → published
+    For non-pipeline articles (e.g. seeded Journal AI) ``pipeline_phase`` is
+    NULL and the article uses the legacy ``status`` field directly.
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -214,6 +223,14 @@ class JournalArticle(SQLModel, table=True):
     published_issue_id: Optional[int] = Field(default=None, index=True)
     submitted_at: datetime = Field(default_factory=_utcnow)
     published_at: Optional[datetime] = None
+    # Living-Article Pipeline. Populated when the article was auto-generated
+    # from a Devin chat session. ``source_session_id`` is the chat thread id;
+    # idempotency on this column ensures a chat that crosses the 3-turn
+    # threshold twice doesn't spawn two articles.
+    source_session_id: Optional[str] = Field(default=None, index=True)
+    pipeline_phase: Optional[str] = Field(default=None, index=True)
+    pipeline_started_at: Optional[datetime] = Field(default=None)
+    pipeline_completed_at: Optional[datetime] = Field(default=None)
     # OJS federation (Phase 2). OJS submission id is the foreign key in the
     # real OJS database once this article has been mirrored.
     ojs_submission_id: Optional[int] = Field(default=None, index=True)
@@ -276,6 +293,38 @@ class JournalPeerReview(SQLModel, table=True):
     ojs_review_assignment_id: Optional[int] = Field(default=None, index=True)
     ojs_synced_at: Optional[datetime] = Field(default=None)
     ojs_sync_error: Optional[str] = Field(default=None)
+
+
+class ArticleReviewRound(SQLModel, table=True):
+    """One step of the Living-Article Pipeline.
+
+    The pipeline runs Claude → Devin → Claude → Gemini → Devin in sequence
+    on every auto-generated article. Each row is one of those steps and
+    captures the reviewing agent, the structured result they produced
+    (suggested edits, code-audit findings, visual prompts), and whether
+    that result was accepted into the article body.
+
+    ``phase`` matches one of the pipeline phase names defined on
+    JournalArticle.pipeline_phase. ``round_no`` is monotonically increasing
+    per article so even if we re-run a phase the history is preserved.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "article_id", "round_no", name="uq_article_review_round"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    article_id: int = Field(index=True)
+    round_no: int
+    phase: str = Field(index=True)  # one of the pipeline_phase strings
+    reviewer_type: str  # always "agent" in v1
+    reviewer_id: str = Field(index=True)  # "claude" | "devin" | "gemini"
+    summary: str = ""  # one-line takeaway shown in the timeline
+    body: str = ""  # full review content (markdown)
+    accepted: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class JournalIssue(SQLModel, table=True):
