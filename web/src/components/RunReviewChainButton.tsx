@@ -75,6 +75,11 @@ export function RunReviewChainButton({ articleId }: { articleId: number }) {
     !!result && result.results.some((r) => !r.ran || r.error);
   const allPassed =
     !!result && result.results.length > 0 && !partialFailure;
+  // The button label reflects whether retrying is meaningful: if any
+  // prior attempt left work behind (partial-result rows OR a top-level
+  // error), the chain is in a resumable state and the button promises
+  // to pick up where it left off (the backend pipeline is idempotent).
+  const showResumeLabel = partialFailure || !!err;
 
   return (
     <div className="space-y-3">
@@ -85,7 +90,7 @@ export function RunReviewChainButton({ articleId }: { articleId: number }) {
       >
         {busy
           ? "Running pipeline (Claude → Devin → Claude → Gemini → Devin, ~2-3 min)…"
-          : partialFailure
+          : showResumeLabel
             ? "Resume review chain"
             : "Run review chain"}
       </button>
@@ -93,7 +98,7 @@ export function RunReviewChainButton({ articleId }: { articleId: number }) {
         <p className="text-xs text-zinc-500">
           Don&apos;t close this tab — each phase makes a real model call.
           The article state is durable on the backend; if the request
-          drops, refresh and click <em>Resume review chain</em>.
+          drops, refresh the page and click the button again to resume.
         </p>
       )}
       {err && (
@@ -102,7 +107,7 @@ export function RunReviewChainButton({ articleId }: { articleId: number }) {
           <p className="mt-1 text-xs text-rose-300">{err}</p>
           <p className="mt-2 text-xs text-zinc-500">
             The article wasn&apos;t lost. Click <em>Resume review chain</em>{" "}
-            to retry from the last completed phase.
+            above to retry from the last completed phase.
           </p>
         </div>
       )}
