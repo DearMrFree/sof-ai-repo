@@ -415,6 +415,31 @@ def test_contribution_blocked_before_vet() -> None:
     assert r.status_code == 409
 
 
+def test_contribution_blocked_on_vetted_revise() -> None:
+    """Devin Review on PR #20: vetted_revise must NOT accumulate impact.
+
+    needs_revision means the pitch came back from Devin with concerns —
+    the applicant hasn't actually cleared the vet, so they shouldn't
+    farm a track record while waiting on a resubmit.
+    """
+    a = _submit()
+    r = client.post(
+        f"/applications/{a['id']}/vet",
+        json={
+            "vet_status": "needs_revision",
+            "reasoning": "vague mission",
+            "recommendation": "tighten paragraph 2",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "vetted_revise"
+    r = client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "challenge", "summary": "filed bug 12"},
+    )
+    assert r.status_code == 409
+
+
 def test_contribution_logged_after_vet_pass() -> None:
     a = _submit()
     _force_status(a["id"], "trio_reviewing")

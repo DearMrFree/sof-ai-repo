@@ -901,7 +901,12 @@ def post_contribution(
     # primary case but a vetted_pass applicant who hasn't yet collected
     # all three votes can still be credited (e.g. they file a Challenge
     # while the trio is still voting).
-    if application.status in {"submitted", "vetting", "vetted_reject"}:
+    if application.status in {
+        "submitted",
+        "vetting",
+        "vetted_revise",
+        "vetted_reject",
+    }:
         raise HTTPException(
             status_code=409,
             detail=(
