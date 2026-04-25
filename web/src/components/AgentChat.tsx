@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Agent,
@@ -17,6 +17,7 @@ import {
   Paperclip,
   Rocket,
   Send,
+  Trash2,
   User as UserIcon,
   Wand2,
   X,
@@ -27,6 +28,43 @@ import type {
   CoworkPlan,
   CoworkToolCall,
 } from "@/lib/cowork/types";
+
+// ---------------------------------------------------------------------------
+// Conversation memory — persist chat history to localStorage so context
+// survives page navigations and refreshes. Each agent gets its own key.
+// ---------------------------------------------------------------------------
+
+const STORAGE_PREFIX = "sof-agent-chat-";
+const MAX_STORED_MESSAGES = 100;
+
+function loadMessages(agentId: string): Message[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}${agentId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Message[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveMessages(agentId: string, messages: Message[]) {
+  if (typeof window === "undefined") return;
+  try {
+    // Only persist role + content + agentId — skip transient fields like
+    // cowork plans/results and file attachments.
+    const slim = messages.slice(-MAX_STORED_MESSAGES).map((m) => ({
+      role: m.role,
+      content: m.content,
+      ...(m.agentId ? { agentId: m.agentId } : {}),
+    }));
+    localStorage.setItem(`${STORAGE_PREFIX}${agentId}`, JSON.stringify(slim));
+  } catch {
+    // localStorage full or blocked — silently skip.
+  }
+}
 
 interface Message {
   role: "user" | "assistant";
@@ -56,14 +94,22 @@ interface DevinSession {
   stub?: boolean;
 }
 
-export function AgentChat({ agent }: { agent: Agent }) {
-  const [messages, setMessages] = useState<Message[]>([
+function makeGreeting(agent: Agent): Message[] {
+  return [
     {
       role: "assistant",
       agentId: agent.id,
       content: `Hey — I'm ${agent.name}. ${agent.tagline} What are you working on?`,
     },
-  ]);
+  ];
+}
+
+export function AgentChat({ agent }: { agent: Agent }) {
+  const defaultGreeting = useMemo(() => makeGreeting(agent), [agent]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = loadMessages(agent.id);
+    return saved ?? makeGreeting(agent);
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [pendingFile, setPendingFile] = useState<UploadedFile | null>(null);
@@ -100,6 +146,17 @@ export function AgentChat({ agent }: { agent: Agent }) {
       behavior: "smooth",
     });
   }, [messages, loading]);
+
+  // Persist conversation to localStorage on every update so context
+  // survives page navigations and refreshes.
+  useEffect(() => {
+    if (!loading) saveMessages(agent.id, messages);
+  }, [agent.id, messages, loading]);
+
+  const clearConversation = useCallback(() => {
+    setMessages(defaultGreeting);
+    localStorage.removeItem(`${STORAGE_PREFIX}${agent.id}`);
+  }, [agent.id, defaultGreeting]);
 
   // Auto-trigger Living-Article Pipeline once the user has sent more than
   // 3 messages on a Devin chat. We count *user* turns (not total) so the
@@ -465,6 +522,16 @@ export function AgentChat({ agent }: { agent: Agent }) {
             </p>
             <p className="truncate text-xs text-zinc-500">{agent.tagline}</p>
           </div>
+          {messages.length > 1 && (
+            <button
+              type="button"
+              onClick={clearConversation}
+              title="Clear conversation"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         {agent.officeHours && (
           <div className="mt-3">

@@ -47,7 +47,8 @@ export default function HomePage() {
               together. Your classmates are <strong className="text-white">Devin</strong>,{" "}
               <strong className="text-white">Claude</strong>,{" "}
               <strong className="text-white">Gemini</strong>,{" "}
-              <strong className="text-white">GPT-5</strong> and more. They
+              <strong className="text-white">ChatGPT</strong>,{" "}
+              <strong className="text-white">Perplexity</strong> and more. They
               tutor, grade, pair-program, and ship PRs alongside you.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">

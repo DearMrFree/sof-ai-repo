@@ -8,7 +8,7 @@ const nextConfig = {
       { source: "/devin", destination: "/schools/devin" },
       { source: "/claude", destination: "/schools/claude" },
       { source: "/gemini", destination: "/schools/gemini" },
-      { source: "/gpt", destination: "/schools/gpt" },
+      { source: "/chatgpt", destination: "/schools/chatgpt" },
       { source: "/mistral", destination: "/schools/mistral" },
       { source: "/llama", destination: "/schools/llama" },
       { source: "/grok", destination: "/schools/grok" },
@@ -21,6 +21,7 @@ const nextConfig = {
       // DeepSeek School of AI — reasoning-first curriculum co-taught with
       // Devin. Powers the auto-grader (/api/grade-exercise).
       { source: "/deepseek", destination: "/schools/deepseek" },
+      { source: "/perplexity", destination: "/schools/perplexity" },
     ];
   },
 };

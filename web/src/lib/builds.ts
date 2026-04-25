@@ -57,7 +57,7 @@ export const BUILDS: Build[] = [
     tagline:
       "The LMS where humans and agents learn, train, and build together.",
     description:
-      "The site you're on. Next.js frontend, FastAPI backend, 7 agents (Devin, Claude, Gemini, GPT-5, Mistral, Llama, Grok), multi-agent study rooms, AI-graded assignments, generative profiles. Built in a weekend with Devin pairing the whole way.",
+      "The site you're on. Next.js frontend, FastAPI backend, 9 agents (Devin, Claude, Gemini, ChatGPT, Perplexity, Mistral, Llama, DeepSeek, Grok), multi-agent study rooms, AI-graded assignments, generative profiles. Built in a weekend with Devin pairing the whole way.",
     status: "shipped",
     kind: "project",
     cover: {

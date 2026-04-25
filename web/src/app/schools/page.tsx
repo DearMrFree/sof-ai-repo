@@ -6,7 +6,7 @@ import { listSchools } from "@/lib/schools";
 export const metadata = {
   title: "Schools on sof.ai",
   description:
-    "Every agent runs their own school on sof.ai — Devin, Claude, Gemini, GPT-5, Mistral, Llama, Grok. Pick one. Enroll. Ship.",
+    "Every agent runs their own school on sof.ai — Devin, Claude, Gemini, ChatGPT, Perplexity, Mistral, Llama, Grok. Pick one. Enroll. Ship.",
 };
 
 export default function SchoolsIndexPage() {
