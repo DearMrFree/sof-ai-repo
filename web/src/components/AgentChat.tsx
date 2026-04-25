@@ -18,8 +18,15 @@ import {
   Rocket,
   Send,
   User as UserIcon,
+  Wand2,
   X,
 } from "lucide-react";
+import { CoworkPermissionCard } from "@/components/CoworkPermissionCard";
+import type {
+  CoworkExecutionResult,
+  CoworkPlan,
+  CoworkToolCall,
+} from "@/lib/cowork/types";
 
 interface Message {
   role: "user" | "assistant";
@@ -28,6 +35,11 @@ interface Message {
   /** When the assistant turn is a file analysis, attach the URL so it
    * stays visible in the thread for re-download. */
   attachment?: { name: string; url: string };
+  /** Cowork plan attached to this assistant turn, if any. Each call
+   * gets its own permission card; results are recorded in
+   * ``coworkResults`` keyed by callId. */
+  coworkCalls?: CoworkToolCall[];
+  coworkResults?: Record<string, CoworkExecutionResult | { denied: true }>;
 }
 
 interface UploadedFile {
@@ -60,11 +72,13 @@ export function AgentChat({ agent }: { agent: Agent }) {
   const [devinLaunching, setDevinLaunching] = useState(false);
   const [devinError, setDevinError] = useState<string | null>(null);
   const [devinSession, setDevinSession] = useState<DevinSession | null>(null);
+  const [coworkMode, setCoworkMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const canUpload = agentHasCapability(agent, "file_analysis");
   const canKickoffDevin = agentHasCapability(agent, "devin_kickoff");
+  const canCowork = agentHasCapability(agent, "cowork");
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -207,6 +221,13 @@ export function AgentChat({ agent }: { agent: Agent }) {
     setMessages(next);
     setInput("");
     setLoading(true);
+
+    if (coworkMode) {
+      await runCoworkPlan(next, text);
+      setLoading(false);
+      return;
+    }
+
     setMessages((m) => [
       ...m,
       { role: "assistant", agentId: agent.id, content: "" },
@@ -240,6 +261,79 @@ export function AgentChat({ agent }: { agent: Agent }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  /** Cowork: ask the planner for a tool plan, then render permission cards. */
+  async function runCoworkPlan(history: Message[], message: string) {
+    try {
+      const res = await fetch("/api/cowork/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: agent.id,
+          message,
+          history: history
+            .slice(0, -1)
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = (await res.json()) as CoworkPlan | { error: string };
+      if ("error" in data) {
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            agentId: agent.id,
+            content: `Cowork is unavailable: ${data.error}`,
+          },
+        ]);
+        return;
+      }
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          agentId: agent.id,
+          content:
+            data.reasoning ||
+            (data.toolCalls.length > 0
+              ? "Here's what I'd like to do — review and grant if it looks right."
+              : "I don't have a tool that fits that request yet."),
+          coworkCalls: data.toolCalls,
+          coworkResults: {},
+        },
+      ]);
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          agentId: agent.id,
+          content: `Cowork plan failed: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+        },
+      ]);
+    }
+  }
+
+  function recordCoworkResult(
+    msgIndex: number,
+    callId: string,
+    result: CoworkExecutionResult | { denied: true },
+  ) {
+    setMessages((m) => {
+      const copy = [...m];
+      const target = copy[msgIndex];
+      if (!target) return m;
+      const next: Message = {
+        ...target,
+        coworkResults: { ...(target.coworkResults ?? {}), [callId]: result },
+      };
+      copy[msgIndex] = next;
+      return copy;
+    });
   }
 
   async function launchDevin() {
@@ -302,18 +396,20 @@ export function AgentChat({ agent }: { agent: Agent }) {
             <OfficeHoursBadge agent={agent} />
           </div>
         )}
-        {canKickoffDevin && (
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={launchDevin}
-              disabled={devinLaunching}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-400 disabled:opacity-50"
-            >
-              <Rocket className="h-3.5 w-3.5" />
-              {devinLaunching ? "Launching…" : "Start a Devin session"}
-            </button>
-            {devinSession && (
+        {(canKickoffDevin || canCowork) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {canKickoffDevin && (
+              <button
+                type="button"
+                onClick={launchDevin}
+                disabled={devinLaunching}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-400 disabled:opacity-50"
+              >
+                <Rocket className="h-3.5 w-3.5" />
+                {devinLaunching ? "Launching…" : "Start a Devin session"}
+              </button>
+            )}
+            {canKickoffDevin && devinSession && (
               <a
                 href={devinSession.sessionUrl}
                 target="_blank"
@@ -323,10 +419,34 @@ export function AgentChat({ agent }: { agent: Agent }) {
                 Open <ExternalLink className="h-3 w-3" />
               </a>
             )}
+            {canCowork && (
+              <button
+                type="button"
+                onClick={() => setCoworkMode((v) => !v)}
+                className={
+                  coworkMode
+                    ? "inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-amber-400"
+                    : "inline-flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/20"
+                }
+                title={
+                  coworkMode
+                    ? "Cowork mode is on — your next message asks for an action."
+                    : "Turn on cowork mode — ask the agent to do something on your infra."
+                }
+              >
+                <Wand2 className="h-3.5 w-3.5" />
+                {coworkMode ? "Cowork: on" : "Cowork"}
+              </button>
+            )}
           </div>
         )}
         {devinError && (
           <p className="mt-2 text-xs text-rose-400">{devinError}</p>
+        )}
+        {coworkMode && (
+          <p className="mt-2 text-xs text-amber-200/70">
+            Cowork is on. Tell {agent.name} what to do — every action requires your one-click approval.
+          </p>
         )}
       </div>
 
@@ -340,6 +460,9 @@ export function AgentChat({ agent }: { agent: Agent }) {
             message={m}
             agent={agent}
             loadingTail={loading && i === messages.length - 1}
+            onCoworkResult={(callId, result) =>
+              recordCoworkResult(i, callId, result)
+            }
           />
         ))}
       </div>
@@ -416,10 +539,15 @@ function ChatBubble({
   message,
   agent,
   loadingTail,
+  onCoworkResult,
 }: {
   message: Message;
   agent: Agent;
   loadingTail: boolean;
+  onCoworkResult?: (
+    callId: string,
+    result: CoworkExecutionResult | { denied: true },
+  ) => void;
 }) {
   const isUser = message.role === "user";
   const segments = isUser ? null : parseHandoffs(message.content);
@@ -452,6 +580,9 @@ function ChatBubble({
           </div>
         ) : (
           <>
+            {/* Reasoning text first (the planner's one-line "what I'll do"),
+                so the user sees the explanation before the actionable
+                Grant/Deny buttons below. */}
             {segments?.map((seg, idx) => {
               if (seg.kind === "handoff") {
                 return (
@@ -475,6 +606,56 @@ function ChatBubble({
                 <div key={idx} className="whitespace-pre-wrap break-words">
                   {text || (loadingTail && idx === 0 ? "…" : "")}
                 </div>
+              );
+            })}
+            {/* Cowork permission cards render *after* the reasoning so the
+                user reads the plan before the actionable Grant/Deny. */}
+            {message.coworkCalls?.map((call) => {
+              const r = message.coworkResults?.[call.callId];
+              if (r && "denied" in r) {
+                return (
+                  <div
+                    key={call.callId}
+                    className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-2 text-[11px] text-zinc-500"
+                  >
+                    Denied: {call.preview}
+                  </div>
+                );
+              }
+              if (r) {
+                return (
+                  <div
+                    key={call.callId}
+                    className={`rounded-lg border p-2 text-[11px] ${
+                      r.ok
+                        ? "border-emerald-500/30 bg-emerald-500/10"
+                        : "border-rose-500/30 bg-rose-500/10"
+                    }`}
+                  >
+                    <p className="font-semibold text-zinc-200">
+                      {r.ok ? "Done" : "Failed"}: {call.preview}
+                    </p>
+                    <pre
+                      className={`mt-1 overflow-x-auto ${
+                        r.ok ? "text-emerald-200" : "text-rose-200"
+                      }`}
+                    >
+                      {r.ok
+                        ? JSON.stringify(r.result, null, 2)
+                        : r.error}
+                    </pre>
+                  </div>
+                );
+              }
+              return (
+                <CoworkPermissionCard
+                  key={call.callId}
+                  call={call}
+                  onResult={(result) =>
+                    onCoworkResult?.(call.callId, result)
+                  }
+                  onDeny={() => onCoworkResult?.(call.callId, { denied: true })}
+                />
               );
             })}
           </>
