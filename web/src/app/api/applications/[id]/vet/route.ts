@@ -83,7 +83,23 @@ export async function POST(
     mission_statement: string;
     apa_statement: string;
     public_review_url: string;
+    public_listing: boolean;
+    likes_count?: number;
+    comments_count?: number;
+    comments?: { user_name: string; body: string }[];
   };
+
+  // Fold public-engagement signal into the re-vet so applications that
+  // have accumulated likes/comments since the original vet get judged
+  // with that evidence in hand. Private listings pass `null` so the
+  // prompt tells Devin "no public lane".
+  const publicSignal = application.public_listing
+    ? {
+        likes: application.likes_count ?? 0,
+        comments: application.comments_count ?? 0,
+        recentComments: (application.comments ?? []).slice(-5),
+      }
+    : null;
 
   let vet;
   try {
@@ -96,6 +112,7 @@ export async function POST(
       missionStatement: application.mission_statement,
       apaStatement: application.apa_statement,
       publicReviewUrl: application.public_review_url,
+      publicSignal,
     });
   } catch (err) {
     return NextResponse.json(

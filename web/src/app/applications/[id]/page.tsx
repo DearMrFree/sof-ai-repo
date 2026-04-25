@@ -13,7 +13,19 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { CheckCircle2, Clock4, ShieldCheck, ThumbsUp, ThumbsDown, HelpCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock4,
+  ShieldCheck,
+  ThumbsUp,
+  ThumbsDown,
+  HelpCircle,
+  MessageCircle,
+} from "lucide-react";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { ApplicationLikeButton } from "@/components/ApplicationLikeButton";
+import { ApplicationCommentForm } from "@/components/ApplicationCommentForm";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +35,14 @@ interface ReviewRow {
   reviewer_name: string;
   vote: "yes" | "no" | "maybe";
   comment: string;
+  created_at: string;
+}
+
+interface CommentRow {
+  id: number;
+  user_id: string;
+  user_name: string;
+  body: string;
   created_at: string;
 }
 
@@ -48,6 +68,9 @@ interface ApplicationDetail {
   final_reasoning: string;
   submitted_at: string;
   reviews: ReviewRow[];
+  comments: CommentRow[];
+  likes_count: number;
+  comments_count: number;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -110,8 +133,12 @@ export default async function ApplicationPage({
 }) {
   const id = Number(params.id);
   if (!Number.isInteger(id) || id <= 0) notFound();
-  const application = await fetchApplication(id);
+  const [application, session] = await Promise.all([
+    fetchApplication(id),
+    getServerSession(authOptions),
+  ]);
   if (!application) notFound();
+  const signedIn = Boolean(session?.user);
 
   const justSubmitted = searchParams.just_submitted === "1";
   const statusLabel = STATUS_LABELS[application.status] ?? application.status;
@@ -271,6 +298,73 @@ export default async function ApplicationPage({
           </div>
         ) : null}
       </section>
+
+      {application.public_listing ? (
+        <section
+          id="comments"
+          className="mt-10 rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/10 p-6"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-fuchsia-300">
+                Community signal
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-white">
+                What sof.ai thinks of this application
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Likes + substantive comments are folded into Devin&apos;s
+                recommendation paragraph to the trio.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <ApplicationLikeButton
+                applicationId={application.id}
+                initialCount={application.likes_count}
+                signedIn={signedIn}
+              />
+              <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-400">
+                <MessageCircle className="h-3 w-3" />
+                {application.comments_count}
+              </span>
+            </div>
+          </header>
+
+          {application.comments.length === 0 ? (
+            <p className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 text-sm text-zinc-400">
+              No comments yet — be the first.
+            </p>
+          ) : (
+            <ul className="mt-6 space-y-3">
+              {application.comments.map((c) => (
+                <li
+                  key={c.id}
+                  className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
+                >
+                  <div className="flex items-center justify-between text-xs text-zinc-500">
+                    <span className="font-medium text-zinc-300">
+                      {c.user_name || "Anonymous"}
+                    </span>
+                    <time>
+                      {new Date(c.created_at).toLocaleString()}
+                    </time>
+                  </div>
+                  <p className="mt-2 whitespace-pre-line text-sm text-zinc-200">
+                    {c.body}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-6">
+            <ApplicationCommentForm
+              applicationId={application.id}
+              signedIn={signedIn}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <p className="mt-8 text-xs text-zinc-500">
         Submitted {new Date(application.submitted_at).toLocaleString()}.

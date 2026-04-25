@@ -2,15 +2,17 @@
  * /apply/public — public list of applications that opted in to public review.
  *
  * Applicants who tick "List my application publicly" on /apply land
- * here. This is the social-signal lane: visitors can read pitches and
- * (Phase 2) leave likes/comments that feed into the trio's decision.
- *
- * v1 just renders the cards. Likes + comments + an impact metric
- * column come in Phase 2 once we wire the engagement model.
+ * here. This is the social-signal lane: visitors read pitches, like
+ * the ones they back, and leave threaded comments. The aggregate
+ * (likes + substantive comments) is folded into Devin's vet
+ * recommendation as the "community evidence" section.
  */
 import Link from "next/link";
 import { headers } from "next/headers";
-import { Globe2, Heart } from "lucide-react";
+import { Globe2, MessageCircle } from "lucide-react";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { ApplicationLikeButton } from "@/components/ApplicationLikeButton";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,8 @@ interface ApplicationRow {
   status: string;
   vet_status: string;
   submitted_at: string;
+  likes_count: number;
+  comments_count: number;
 }
 
 async function fetchPublic(): Promise<ApplicationRow[]> {
@@ -46,7 +50,8 @@ async function fetchPublic(): Promise<ApplicationRow[]> {
 }
 
 export default async function ApplyPublicPage() {
-  const rows = await fetchPublic();
+  const [rows, session] = await Promise.all([fetchPublic(), getServerSession(authOptions)]);
+  const signedIn = Boolean(session?.user);
   return (
     <main className="mx-auto max-w-5xl px-4 pb-24 pt-10">
       <header className="rounded-3xl border border-fuchsia-500/30 bg-gradient-to-br from-fuchsia-950/40 via-zinc-950 to-emerald-950/30 p-8">
@@ -82,40 +87,50 @@ export default async function ApplyPublicPage() {
               key={r.id}
               className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5 hover:border-fuchsia-500/40"
             >
+              <div className="flex items-baseline justify-between gap-2">
+                <Link
+                  href={`/applications/${r.id}`}
+                  className="text-lg font-semibold text-white hover:text-fuchsia-300"
+                >
+                  {r.applicant_name}
+                  {r.agent_name ? (
+                    <span className="text-zinc-400"> · {r.agent_name}</span>
+                  ) : null}
+                </Link>
+                <span className="text-xs text-zinc-500">#{r.id}</span>
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                {r.applicant_kind.replace(/_/g, " ")}
+                {r.org_name ? ` · ${r.org_name}` : ""}
+              </p>
               <Link href={`/applications/${r.id}`} className="block">
-                <div className="flex items-baseline justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-white">
-                    {r.applicant_name}
-                    {r.agent_name ? (
-                      <span className="text-zinc-400"> · {r.agent_name}</span>
-                    ) : null}
-                  </h2>
-                  <span className="text-xs text-zinc-500">
-                    #{r.id}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {r.applicant_kind.replace(/_/g, " ")}
-                  {r.org_name ? ` · ${r.org_name}` : ""}
-                </p>
                 <p className="mt-3 line-clamp-3 text-sm text-zinc-300">
                   {r.mission_statement}
                 </p>
-                <div className="mt-4 flex items-center gap-2 text-xs text-zinc-500">
-                  <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5">
-                    {r.status.replace(/_/g, " ")}
-                  </span>
-                  {r.vet_status !== "pending" ? (
-                    <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-sky-300">
-                      Devin: {r.vet_status.replace(/_/g, " ")}
-                    </span>
-                  ) : null}
-                  <span className="ml-auto inline-flex items-center gap-1 text-zinc-500">
-                    <Heart className="h-3 w-3" />
-                    Phase 2
-                  </span>
-                </div>
               </Link>
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5">
+                  {r.status.replace(/_/g, " ")}
+                </span>
+                {r.vet_status !== "pending" ? (
+                  <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-sky-300">
+                    Devin: {r.vet_status.replace(/_/g, " ")}
+                  </span>
+                ) : null}
+                <span className="ml-auto inline-flex items-center gap-2">
+                  <ApplicationLikeButton
+                    applicationId={r.id}
+                    initialCount={r.likes_count}
+                    signedIn={signedIn}
+                  />
+                  <Link
+                    href={`/applications/${r.id}#comments`}
+                    className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 hover:border-fuchsia-500/40 hover:text-fuchsia-300"
+                  >
+                    <MessageCircle className="h-3 w-3" /> {r.comments_count}
+                  </Link>
+                </span>
+              </div>
             </li>
           ))}
         </ul>
