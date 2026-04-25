@@ -1,8 +1,0 @@
-{
-  "title": "Software Engineer, powered by Devin",
-  "tagline": "Go from 'I want to build software' to shipping real PRs — with a real autonomous engineer pair-programming with you.",
-  "description": "A 12-week curriculum that teaches modern software engineering by pairing you with Devin. You'll learn Git, code reading, specs, debugging, system design, and shipping — and at every capstone you'll actually ship a PR that Devin opens for you. Inspired by Curriki's open educational resources ethos and the 'Programs → Playlists → Activities' model from CurrikiStudio.",
-  "heroEmoji": "💻",
-  "totalWeeks": 12,
-  "poweredBy": "Devin"
-}
