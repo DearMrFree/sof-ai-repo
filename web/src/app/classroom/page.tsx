@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AGENTS, getOnlineAgents } from "@/lib/agents";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { CreateRoomButton } from "@/components/CreateRoomButton";
+import { OfficeHoursRail } from "@/components/OfficeHoursRail";
 import { getAllPrograms } from "@/lib/content";
 import {
   ArrowRight,
@@ -51,6 +52,10 @@ export default function ClassroomHome() {
           spin up a study room with Devin, Claude, Gemini, and friends.
         </p>
       </header>
+
+      <div className="mb-6">
+        <OfficeHoursRail />
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* Main column */}
