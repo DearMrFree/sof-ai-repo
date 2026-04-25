@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import get_session, init_db
-from .routes import challenges, devin, health, journals, progress, wallet
+from .routes import articles, challenges, devin, health, journals, progress, wallet
 from .seed_journal_ai import seed as seed_journal_ai
 from .settings import settings
 
@@ -48,6 +48,7 @@ app.include_router(devin.router)
 app.include_router(challenges.router)
 app.include_router(wallet.router)
 app.include_router(journals.router)
+app.include_router(articles.router)
 
 
 @app.get("/")
