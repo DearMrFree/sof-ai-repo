@@ -27,6 +27,8 @@ proxy.
 
 from __future__ import annotations
 
+import os
+from datetime import timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -122,6 +124,10 @@ class ApplicationOut(BaseModel):
     # Public-engagement signal — only meaningful for opt-in public listings.
     likes_count: int = 0
     comments_count: int = 0
+    # 30-day renewal cron (Phase 2c)
+    member_status: str = "pending"
+    member_status_at: Optional[str] = None
+    member_status_reason: str = ""
 
 
 class ReviewOut(BaseModel):
@@ -296,6 +302,11 @@ def _serialize_application(
         submitted_at=a.submitted_at.isoformat(),
         likes_count=likes_count,
         comments_count=comments_count,
+        member_status=a.member_status,
+        member_status_at=a.member_status_at.isoformat()
+        if a.member_status_at
+        else None,
+        member_status_reason=a.member_status_reason,
     )
 
 
@@ -946,3 +957,185 @@ def list_contributions(
         .limit(capped)
     ).all()
     return [_serialize_contribution(c) for c in rows]
+
+
+# ---------------------------------------------------------------------------
+# 30-day renewal cron (Phase 2c)
+# ---------------------------------------------------------------------------
+#
+# A daily Vercel Cron hits POST /applications/cron/auto-renew. For each
+# ``conditionally_accepted`` applicant whose ``final_decision_at`` is at
+# least RENEWAL_WINDOW_DAYS old AND whose ``member_status`` is still
+# ``pending``, we sum AgentContribution.weight and bucket:
+#
+#   weighted >= RENEWAL_THRESHOLD_WEIGHTED  → member
+#   weighted >= RENEWAL_GRAY_ZONE_LOWER     → escalated  (re-trio call)
+#   weighted <  RENEWAL_GRAY_ZONE_LOWER     → expired
+#
+# The cron NEVER mutates the upstream ``status`` column — it only writes
+# to ``member_status`` so the audit trail stays clean. The trio can
+# always overrule by hitting POST /applications/{id}/member-override.
+
+
+def _renewal_threshold() -> float:
+    try:
+        return float(os.getenv("RENEWAL_THRESHOLD_WEIGHTED", "5.0"))
+    except (TypeError, ValueError):
+        return 5.0
+
+
+def _renewal_gray_zone() -> float:
+    try:
+        return float(os.getenv("RENEWAL_GRAY_ZONE_LOWER", "1.0"))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _renewal_window_days() -> int:
+    try:
+        n = int(os.getenv("RENEWAL_WINDOW_DAYS", "30"))
+    except (TypeError, ValueError):
+        return 30
+    return max(1, n)
+
+
+class RenewalDecision(BaseModel):
+    application_id: int
+    applicant_email: str
+    weighted_impact: float
+    decision: str  # "member" | "escalated" | "expired"
+    reason: str
+
+
+class RenewalCronOut(BaseModel):
+    threshold: float
+    gray_zone_lower: float
+    window_days: int
+    evaluated: int
+    renewed: list[RenewalDecision]
+    escalated: list[RenewalDecision]
+    expired: list[RenewalDecision]
+
+
+@router.post(
+    "/cron/auto-renew",
+    response_model=RenewalCronOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def auto_renew(
+    session: Session = Depends(get_session),
+) -> RenewalCronOut:
+    """Walk every conditionally-accepted applicant past the 30-day mark.
+
+    Idempotent — once an applicant lands in member/escalated/expired,
+    they're skipped on subsequent runs (member_status != "pending"
+    short-circuits). Safe to run hourly; the cron only catches up.
+    """
+    threshold = _renewal_threshold()
+    gray_lower = _renewal_gray_zone()
+    window = _renewal_window_days()
+    cutoff = _utcnow() - timedelta(days=window)
+
+    # Pull every conditionally-accepted applicant whose acceptance is at
+    # least ``window`` days old AND whose member_status is still
+    # ``pending`` (not yet decided).
+    candidates = session.exec(
+        select(AgentApplication).where(
+            AgentApplication.status == "conditionally_accepted",
+            AgentApplication.member_status == "pending",
+            AgentApplication.final_decision_at != None,  # noqa: E711
+            AgentApplication.final_decision_at <= cutoff,
+        )
+    ).all()
+
+    renewed: list[RenewalDecision] = []
+    escalated: list[RenewalDecision] = []
+    expired: list[RenewalDecision] = []
+
+    for app in candidates:
+        impact = _compute_impact(session, app.id or 0)
+        weighted = impact.weighted
+
+        if weighted >= threshold:
+            decision = "member"
+            reason = (
+                f"Weighted impact {weighted:.2f} ≥ threshold "
+                f"{threshold:.2f} after {window}-day window — auto-renewed."
+            )
+            bucket = renewed
+        elif weighted >= gray_lower:
+            decision = "escalated"
+            reason = (
+                f"Weighted impact {weighted:.2f} is in the gray zone "
+                f"[{gray_lower:.2f}, {threshold:.2f}) after {window} "
+                "days — re-escalated to trio for a manual call."
+            )
+            bucket = escalated
+        else:
+            decision = "expired"
+            reason = (
+                f"Weighted impact {weighted:.2f} < gray-zone floor "
+                f"{gray_lower:.2f} after {window} days — conditional "
+                "acceptance expired. Applicant may reapply."
+            )
+            bucket = expired
+
+        app.member_status = decision
+        app.member_status_at = _utcnow()
+        app.member_status_reason = reason
+        session.add(app)
+        bucket.append(
+            RenewalDecision(
+                application_id=app.id or 0,
+                applicant_email=app.applicant_email,
+                weighted_impact=weighted,
+                decision=decision,
+                reason=reason,
+            )
+        )
+
+    session.commit()
+
+    return RenewalCronOut(
+        threshold=threshold,
+        gray_zone_lower=gray_lower,
+        window_days=window,
+        evaluated=len(candidates),
+        renewed=renewed,
+        escalated=escalated,
+        expired=expired,
+    )
+
+
+class MemberOverrideIn(BaseModel):
+    member_status: str = Field(..., pattern="^(pending|member|expired|escalated)$")
+    reason: str = Field(default="", max_length=2000)
+
+
+@router.post(
+    "/{application_id}/member-override",
+    response_model=ApplicationOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def member_override(
+    application_id: int,
+    body: MemberOverrideIn,
+    session: Session = Depends(get_session),
+) -> ApplicationOut:
+    """Trio escape hatch — manually set member_status, with reason logged.
+
+    Used when the cron escalates an applicant in the gray zone (the
+    trio reads the impact + comments and decides yes/no/extend) and
+    when a member needs to be revoked or reinstated outside the cron's
+    cadence.
+    """
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    application.member_status = body.member_status
+    application.member_status_at = _utcnow()
+    application.member_status_reason = body.reason or "Manual trio override."
+    session.add(application)
+    session.commit()
+    session.refresh(application)
+    return _serialize_application(application)
