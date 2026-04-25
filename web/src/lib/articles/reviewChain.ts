@@ -263,7 +263,7 @@ async function runGeminiReview(
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
     body: JSON.stringify({
-      systemInstruction: { role: "system", parts: [{ text: system }] },
+      systemInstruction: { parts: [{ text: system }] },
       contents: [
         { role: "user", parts: [{ text: userMessage }] },
       ],

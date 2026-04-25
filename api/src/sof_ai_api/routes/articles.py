@@ -158,22 +158,51 @@ class ArticleDetailOut(ArticlePipelineOut):
 # ---------------------------------------------------------------------------
 
 
+# Canonical friendly names for well-known agent/author IDs. Legacy rows
+# were persisted in the ``"type:id"`` form without a display-name segment;
+# when we read one back we resolve it through this map so the UI shows
+# "Dr. Freedom Cheteni" and "Devin" instead of "freedom" and "devin".
+_CANONICAL_NAMES: dict[tuple[str, str], str] = {
+    ("user", "freedom"): "Dr. Freedom Cheteni",
+    ("agent", "devin"): "Devin",
+    ("agent", "claude"): "Claude",
+    ("agent", "gemini"): "Gemini",
+}
+
+
 def _parse_author(packed: str) -> ArticleAuthor:
-    """Convert a stored ``"user:uuid"`` / ``"agent:devin"`` to ArticleAuthor."""
+    """Convert a packed wire form to ArticleAuthor.
+
+    Wire form is ``"type:id|display_name"``. Legacy rows without the
+    display-name segment fall back to the canonical name map, and
+    finally to the raw id so the author is never rendered as a blank.
+    """
     if ":" not in packed:
-        return ArticleAuthor(type="agent", id=packed, display_name=packed)
-    kind, ident = packed.split(":", 1)
-    return ArticleAuthor(
-        type="user" if kind == "user" else "agent",
-        id=ident,
-        display_name=ident,
-    )
+        friendly = _CANONICAL_NAMES.get(("agent", packed), packed)
+        return ArticleAuthor(type="agent", id=packed, display_name=friendly)
+    kind, rest = packed.split(":", 1)
+    if "|" in rest:
+        ident, display = rest.split("|", 1)
+    else:
+        ident, display = rest, ""
+    atype = "user" if kind == "user" else "agent"
+    if not display:
+        display = _CANONICAL_NAMES.get((atype, ident), ident)
+    return ArticleAuthor(type=atype, id=ident, display_name=display)
 
 
 def _pack_author(a: ArticleAuthor) -> str:
-    """Inverse of _parse_author — pack into the comma-separated wire form."""
+    """Inverse of _parse_author — pack into the comma-separated wire form.
+
+    Display names are round-tripped so the UI keeps friendly names across
+    reads. ``|`` and ``,`` are stripped from the display to keep the wire
+    format unambiguous.
+    """
     prefix = "user" if a.type == "user" else "agent"
-    return f"{prefix}:{a.id}"
+    display = (a.display_name or "").replace("|", " ").replace(",", " ").strip()
+    if not display:
+        return f"{prefix}:{a.id}"
+    return f"{prefix}:{a.id}|{display}"
 
 
 def _parse_coauthors(packed: str) -> list[ArticleAuthor]:
@@ -303,7 +332,16 @@ def start_article(
     devin = ArticleAuthor(type="agent", id="devin", display_name="Devin")
 
     # Drop forbidden reviewer agents from coauthors and dedupe by (type,id).
-    seen: set[tuple[str, str]] = {("user", "freedom"), ("agent", "devin")}
+    # When Dr. Cheteni is the signed-in user the proxy forwards him as
+    # ``primary_author = {type: "user", id: "email:freedom@thevrschool.org"}``.
+    # Treat that id (and a bare ``"freedom"``) as equivalent to the canonical
+    # slot-1 entry so he is never listed twice.
+    freedom_aliases = {
+        ("user", "freedom"),
+        ("user", f"email:{APPROVER_EMAIL}"),
+        ("user", APPROVER_EMAIL),
+    }
+    seen: set[tuple[str, str]] = {("agent", "devin"), *freedom_aliases}
     other_humans: list[ArticleAuthor] = []
     for c in [body.primary_author, *body.coauthors]:
         if c.type == "agent" and c.id in {"claude", "gemini"}:

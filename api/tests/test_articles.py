@@ -49,12 +49,40 @@ def test_start_creates_draft_with_canonical_authors() -> None:
     a = _start(session_id="sess-canonical-1")
     assert a["pipeline_phase"] == "drafted"
     assert a["status"] == "draft"
-    # Position 1 is always Freedom.
+    # Position 1 is always Freedom, with his friendly display name.
     assert a["primary_author"]["id"] == "freedom"
     assert a["primary_author"]["type"] == "user"
-    # Position 2 is always Devin.
+    assert a["primary_author"]["display_name"] == "Dr. Freedom Cheteni"
+    # Position 2 is always Devin, with his friendly display name.
     assert a["coauthors"][0]["id"] == "devin"
     assert a["coauthors"][0]["type"] == "agent"
+    assert a["coauthors"][0]["display_name"] == "Devin"
+
+
+def test_start_dedupes_freedom_even_when_signed_in_as_email() -> None:
+    """Signed-in Dr. Cheteni must never appear twice on an article.
+
+    The NextAuth proxy forwards him as
+    ``{"type":"user","id":"email:freedom@thevrschool.org"}``; the API
+    must canonicalize that id into the slot-1 Freedom entry instead of
+    appending him as a duplicate coauthor.
+    """
+    a = _start(
+        session_id="sess-freedom-dedupe",
+        coauthors=[
+            {
+                "type": "user",
+                "id": "email:freedom@thevrschool.org",
+                "display_name": "Freedom Cheteni",
+            }
+        ],
+    )
+    # Freedom must still be slot 1 with the canonical display_name.
+    assert a["primary_author"]["id"] == "freedom"
+    assert a["primary_author"]["display_name"] == "Dr. Freedom Cheteni"
+    # Only Devin follows; the email-form Freedom must not appear.
+    assert len(a["coauthors"]) == 1, a["coauthors"]
+    assert a["coauthors"][0]["id"] == "devin"
 
 
 def test_start_is_idempotent_on_session_id() -> None:
