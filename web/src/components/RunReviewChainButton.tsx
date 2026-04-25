@@ -71,6 +71,16 @@ export function RunReviewChainButton({ articleId }: { articleId: number }) {
     }
   }
 
+  const partialFailure =
+    !!result && result.results.some((r) => !r.ran || r.error);
+  const allPassed =
+    !!result && result.results.length > 0 && !partialFailure;
+  // The button label reflects whether retrying is meaningful: if any
+  // prior attempt left work behind (partial-result rows OR a top-level
+  // error), the chain is in a resumable state and the button promises
+  // to pick up where it left off (the backend pipeline is idempotent).
+  const showResumeLabel = partialFailure || !!err;
+
   return (
     <div className="space-y-3">
       <button
@@ -79,21 +89,60 @@ export function RunReviewChainButton({ articleId }: { articleId: number }) {
         className="rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-400 disabled:opacity-50"
       >
         {busy
-          ? "Running pipeline (this can take ~60s)…"
-          : "Run review chain"}
+          ? "Running pipeline (Claude → Devin → Claude → Gemini → Devin, ~2-3 min)…"
+          : showResumeLabel
+            ? "Resume review chain"
+            : "Run review chain"}
       </button>
-      {err && <p className="text-sm text-rose-300">{err}</p>}
+      {busy && (
+        <p className="text-xs text-zinc-500">
+          Don&apos;t close this tab — each phase makes a real model call.
+          The article state is durable on the backend; if the request
+          drops, refresh the page and click the button again to resume.
+        </p>
+      )}
+      {err && (
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-200">
+          <p className="font-semibold">Pipeline error</p>
+          <p className="mt-1 text-xs text-rose-300">{err}</p>
+          <p className="mt-2 text-xs text-zinc-500">
+            The article wasn&apos;t lost. Click <em>Resume review chain</em>{" "}
+            above to retry from the last completed phase.
+          </p>
+        </div>
+      )}
       {result && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 text-sm text-zinc-300">
+        <div
+          className={`rounded-lg border p-4 text-sm ${
+            allPassed
+              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-100"
+              : "border-amber-500/30 bg-amber-500/5 text-amber-100"
+          }`}
+        >
           <p>
             Walked from <code>{result.startingPhase}</code> →{" "}
-            <code>{result.endingPhase}</code>.
+            <code>{result.endingPhase}</code>
+            {allPassed ? " · all 5 rounds completed." : " · partial run."}
           </p>
-          <ul className="mt-2 space-y-1 text-xs text-zinc-400">
+          <ul className="mt-2 space-y-1 text-xs">
             {result.results.map((r) => (
-              <li key={r.phase}>
-                {r.ran ? "✓" : "✗"} {r.phase} — {r.reviewer_id}
-                {r.error ? ` (error: ${r.error})` : ""}
+              <li key={r.phase} className="font-mono">
+                <span
+                  className={
+                    r.ran
+                      ? "text-emerald-300"
+                      : "text-rose-300"
+                  }
+                >
+                  {r.ran ? "✓" : "✗"}
+                </span>{" "}
+                {r.phase} — {r.reviewer_id}
+                {r.error ? (
+                  <span className="text-rose-300">
+                    {" "}
+                    · {r.error.slice(0, 120)}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
