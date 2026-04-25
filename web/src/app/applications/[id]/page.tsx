@@ -46,6 +46,23 @@ interface CommentRow {
   created_at: string;
 }
 
+interface ContributionRow {
+  id: number;
+  application_id: number;
+  kind: string;
+  source_id: number | null;
+  source_url: string;
+  summary: string;
+  weight: number;
+  created_at: string;
+}
+
+interface ImpactSummary {
+  total: number;
+  weighted: number;
+  by_kind: Record<string, number>;
+}
+
 interface ApplicationDetail {
   id: number;
   applicant_kind: string;
@@ -71,7 +88,17 @@ interface ApplicationDetail {
   comments: CommentRow[];
   likes_count: number;
   comments_count: number;
+  contributions: ContributionRow[];
+  impact: ImpactSummary;
 }
+
+const KIND_LABEL: Record<string, string> = {
+  challenge: "Challenges filed",
+  skill: "Skills published",
+  article: "Articles co-authored",
+  human_helped: "Humans helped",
+  other: "Other contributions",
+};
 
 const STATUS_LABELS: Record<string, string> = {
   submitted: "Just submitted",
@@ -298,6 +325,96 @@ export default async function ApplicationPage({
           </div>
         ) : null}
       </section>
+
+      {application.impact.total > 0 ||
+      application.status === "conditionally_accepted" ? (
+        <section
+          id="impact"
+          className="mt-10 rounded-2xl border border-emerald-500/30 bg-emerald-950/10 p-6"
+        >
+          <header className="flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-emerald-300">
+                Community impact
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-white">
+                What this applicant has shipped for sof.ai
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Logged contributions roll up to the conditional → full
+                membership decision at the 30-day mark.
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-widest text-emerald-300">
+                Weighted impact
+              </p>
+              <p className="mt-1 text-3xl font-bold text-white">
+                {application.impact.weighted.toFixed(1)}
+              </p>
+              <p className="text-xs text-zinc-500">
+                {application.impact.total}{" "}
+                contribution
+                {application.impact.total === 1 ? "" : "s"}
+              </p>
+            </div>
+          </header>
+
+          <ul className="mt-5 grid gap-2 sm:grid-cols-2">
+            {Object.entries(KIND_LABEL).map(([k, label]) => {
+              const n = application.impact.by_kind[k] ?? 0;
+              return (
+                <li
+                  key={k}
+                  className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                    n > 0
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                      : "border-zinc-800 bg-zinc-950/40 text-zinc-500"
+                  }`}
+                >
+                  <span>{label}</span>
+                  <span className="font-mono text-base">{n}</span>
+                </li>
+              );
+            })}
+          </ul>
+
+          {application.contributions.length > 0 ? (
+            <ul className="mt-5 space-y-2">
+              {application.contributions.slice(0, 10).map((c) => (
+                <li
+                  key={c.id}
+                  className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-sm"
+                >
+                  <div className="flex items-center justify-between text-xs text-zinc-500">
+                    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-200">
+                      {KIND_LABEL[c.kind] ?? c.kind}
+                    </span>
+                    <time>{new Date(c.created_at).toLocaleDateString()}</time>
+                  </div>
+                  {c.summary ? (
+                    <p className="mt-2 text-zinc-200">{c.summary}</p>
+                  ) : null}
+                  {c.source_url ? (
+                    <Link
+                      href={c.source_url}
+                      target="_blank"
+                      className="mt-1 inline-block text-xs text-fuchsia-300 underline"
+                    >
+                      Audit source ↗
+                    </Link>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-400">
+              No contributions logged yet — the meter starts the moment
+              this applicant ships their first thing.
+            </p>
+          )}
+        </section>
+      ) : null}
 
       {application.public_listing ? (
         <section

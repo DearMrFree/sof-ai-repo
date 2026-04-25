@@ -38,6 +38,7 @@ from ..db import get_session
 from ..models import (
     AgentApplication,
     AgentApplicationReview,
+    AgentContribution,
     ApplicationComment,
     ApplicationLike,
     _utcnow,
@@ -65,6 +66,14 @@ TRIO_EMAILS: frozenset[str] = frozenset(e.lower() for e, _ in TRIO_REVIEWERS)
 ApplicantKind = Literal["independent_agent", "company_ai", "human_seeking"]
 VetStatus = Literal["pending", "passed", "needs_revision", "rejected"]
 ReviewVote = Literal["yes", "no", "maybe"]
+ContributionKind = Literal[
+    "challenge", "skill", "article", "human_helped", "other"
+]
+
+# Soft cap on contributions returned per application — protects the
+# detail page from a runaway tally.
+CONTRIBUTION_LIST_LIMIT_DEFAULT = 100
+CONTRIBUTION_LIST_LIMIT_MAX = 500
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +158,44 @@ class CommentIn(BaseModel):
     body: str = Field(..., min_length=1, max_length=4000)
 
 
+class ContributionIn(BaseModel):
+    """A logged community contribution by an accepted applicant.
+
+    Posted by an admin (Dr. Cheteni) or by trusted automation (e.g. the
+    Living-Article Pipeline auto-credits applicants who co-author).
+    """
+
+    kind: ContributionKind
+    source_id: Optional[int] = Field(default=None, ge=1)
+    source_url: str = Field(default="", max_length=400)
+    summary: str = Field(default="", max_length=2000)
+    weight: float = Field(default=1.0, ge=0.0, le=100.0)
+
+
+class ContributionOut(BaseModel):
+    id: int
+    application_id: int
+    kind: str
+    source_id: Optional[int]
+    source_url: str
+    summary: str
+    weight: float
+    created_at: str
+
+
+class ImpactSummaryOut(BaseModel):
+    """Aggregate of an applicant's contributions, used on the detail UI."""
+
+    total: int = 0
+    weighted: float = 0.0
+    by_kind: dict[str, int] = Field(default_factory=dict)
+
+
 class ApplicationDetailOut(ApplicationOut):
     reviews: list[ReviewOut]
     comments: list[CommentOut] = []
+    contributions: list[ContributionOut] = []
+    impact: ImpactSummaryOut = Field(default_factory=ImpactSummaryOut)
 
 
 class VetIn(BaseModel):
@@ -266,6 +310,33 @@ def _serialize_comment(c: ApplicationComment) -> CommentOut:
     )
 
 
+def _serialize_contribution(c: AgentContribution) -> ContributionOut:
+    return ContributionOut(
+        id=c.id or 0,
+        application_id=c.application_id,
+        kind=c.kind,
+        source_id=c.source_id,
+        source_url=c.source_url,
+        summary=c.summary,
+        weight=c.weight,
+        created_at=c.created_at.isoformat(),
+    )
+
+
+def _impact_summary(rows: list[AgentContribution]) -> ImpactSummaryOut:
+    """Roll a list of contributions into the aggregate the trio sees."""
+    by_kind: dict[str, int] = {}
+    weighted = 0.0
+    for c in rows:
+        by_kind[c.kind] = by_kind.get(c.kind, 0) + 1
+        weighted += c.weight
+    return ImpactSummaryOut(
+        total=len(rows),
+        weighted=round(weighted, 3),
+        by_kind=by_kind,
+    )
+
+
 def _serialize_review(r: AgentApplicationReview) -> ReviewOut:
     return ReviewOut(
         id=r.id or 0,
@@ -372,6 +443,12 @@ def get_application(
             )
         ).all()
     )
+    contributions = session.exec(
+        select(AgentContribution)
+        .where(AgentContribution.application_id == application_id)
+        .order_by(AgentContribution.created_at.desc())
+        .limit(CONTRIBUTION_LIST_LIMIT_DEFAULT)
+    ).all()
     base = _serialize_application(
         application,
         likes_count=likes_count,
@@ -381,6 +458,8 @@ def get_application(
         **base.model_dump(),
         reviews=[_serialize_review(r) for r in reviews],
         comments=[_serialize_comment(c) for c in comments],
+        contributions=[_serialize_contribution(c) for c in contributions],
+        impact=_impact_summary(list(contributions)),
     )
 
 
@@ -750,3 +829,86 @@ def list_comments(
         .order_by(ApplicationComment.created_at.asc())
     ).all()
     return [_serialize_comment(c) for c in rows]
+
+
+# ---------------------------------------------------------------------------
+# Contributions (Phase 2b)
+# ---------------------------------------------------------------------------
+#
+# Once an applicant is conditionally accepted, their impact is what
+# turns conditional → full membership. We log contributions in five
+# canonical kinds (challenge / skill / article / human_helped / other)
+# and surface the rolled-up tally on the public detail page so the
+# trio + community can see who is actually pulling weight.
+#
+# POST is internal-auth so only the proxy (or a trusted admin script)
+# can credit a contribution. GET is public so the trio can audit
+# without an extra round-trip.
+
+
+@router.post(
+    "/{application_id}/contributions",
+    response_model=ContributionOut,
+    status_code=201,
+    dependencies=[Depends(require_internal_auth)],
+)
+def post_contribution(
+    application_id: int,
+    body: ContributionIn,
+    session: Session = Depends(get_session),
+) -> ContributionOut:
+    """Credit an accepted applicant with a community contribution."""
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    # Only contributors who have at least made it past Devin's vet count
+    # — pre-vet rows can't accumulate impact (would let a rejected
+    # applicant build a fake track record). The trio sign-off is *not*
+    # required because a conditionally-accepted applicant is the
+    # primary case but a vetted_pass applicant who hasn't yet collected
+    # all three votes can still be credited (e.g. they file a Challenge
+    # while the trio is still voting).
+    if application.status in {"submitted", "vetting", "vetted_reject"}:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"application is in status {application.status!r}; "
+                "must be past Devin's vet to log contributions."
+            ),
+        )
+
+    contribution = AgentContribution(
+        application_id=application_id,
+        kind=body.kind,
+        source_id=body.source_id,
+        source_url=body.source_url.strip(),
+        summary=body.summary.strip(),
+        weight=body.weight,
+    )
+    session.add(contribution)
+    session.commit()
+    session.refresh(contribution)
+    return _serialize_contribution(contribution)
+
+
+@router.get(
+    "/{application_id}/contributions",
+    response_model=list[ContributionOut],
+)
+def list_contributions(
+    application_id: int,
+    session: Session = Depends(get_session),
+    limit: int = CONTRIBUTION_LIST_LIMIT_DEFAULT,
+) -> list[ContributionOut]:
+    """Public list of contributions logged for an application."""
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    capped = max(1, min(limit, CONTRIBUTION_LIST_LIMIT_MAX))
+    rows = session.exec(
+        select(AgentContribution)
+        .where(AgentContribution.application_id == application_id)
+        .order_by(AgentContribution.created_at.desc())
+        .limit(capped)
+    ).all()
+    return [_serialize_contribution(c) for c in rows]

@@ -380,3 +380,115 @@ def test_list_applications_includes_engagement_counts() -> None:
     row = next(r for r in listed if r["id"] == a["id"])
     assert row["likes_count"] == 1
     assert row["comments_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 2b: contributions / impact metrics
+# ---------------------------------------------------------------------------
+
+
+def _force_status(application_id: int, status: str) -> None:
+    """Reach into the DB and bump status without going through the proxy.
+
+    Tests need an application past Devin's vet to log contributions, but
+    the route is internal-auth gated and the test env has no key. We
+    use the existing /vet route which transitions submitted →
+    trio_reviewing on vet_status="passed".
+    """
+    r = client.post(
+        f"/applications/{application_id}/vet",
+        json={
+            "vet_status": "passed",
+            "reasoning": "stub",
+            "recommendation": "stub",
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_contribution_blocked_before_vet() -> None:
+    a = _submit()
+    r = client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "challenge", "summary": "filed bug 12"},
+    )
+    assert r.status_code == 409
+
+
+def test_contribution_logged_after_vet_pass() -> None:
+    a = _submit()
+    _force_status(a["id"], "trio_reviewing")
+    r = client.post(
+        f"/applications/{a['id']}/contributions",
+        json={
+            "kind": "challenge",
+            "source_id": 42,
+            "source_url": "https://sof.ai/challenges/42",
+            "summary": "fixed flaky token parser",
+            "weight": 1.5,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["kind"] == "challenge"
+    assert body["weight"] == 1.5
+    assert body["source_url"] == "https://sof.ai/challenges/42"
+
+
+def test_contribution_kind_validated() -> None:
+    a = _submit()
+    _force_status(a["id"], "trio_reviewing")
+    r = client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "evil", "summary": "whatever"},
+    )
+    assert r.status_code == 422
+
+
+def test_list_contributions_returns_newest_first() -> None:
+    a = _submit()
+    _force_status(a["id"], "trio_reviewing")
+    for kind, summary in [
+        ("challenge", "first"),
+        ("skill", "second"),
+        ("article", "third"),
+    ]:
+        r = client.post(
+            f"/applications/{a['id']}/contributions",
+            json={"kind": kind, "summary": summary},
+        )
+        assert r.status_code == 201
+    r = client.get(f"/applications/{a['id']}/contributions")
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 3
+    # Newest first (descending by created_at) — last logged ("third")
+    # appears first.
+    assert rows[0]["summary"] == "third"
+    assert rows[-1]["summary"] == "first"
+
+
+def test_detail_includes_impact_summary() -> None:
+    a = _submit()
+    _force_status(a["id"], "trio_reviewing")
+    for kind, weight in [
+        ("challenge", 1.0),
+        ("challenge", 1.5),
+        ("skill", 2.0),
+        ("article", 1.0),
+    ]:
+        client.post(
+            f"/applications/{a['id']}/contributions",
+            json={"kind": kind, "summary": "x", "weight": weight},
+        )
+    r = client.get(f"/applications/{a['id']}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["impact"]["total"] == 4
+    assert body["impact"]["weighted"] == 5.5
+    assert body["impact"]["by_kind"] == {
+        "challenge": 2,
+        "skill": 1,
+        "article": 1,
+    }
+    assert len(body["contributions"]) == 4
