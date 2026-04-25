@@ -1,11 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { Megaphone, X } from "lucide-react";
 import { useToast } from "@/components/Toast";
-
 
 
 type Tag = "confusing" | "broken" | "missing" | "question" | "idea";
@@ -18,10 +18,16 @@ const TAGS: { id: Tag; label: string; emoji: string; blurb: string }[] = [
   { id: "idea", label: "Design idea", emoji: "💡", blurb: "Here's a better way to do it." },
 ];
 
+type Mode = "authed" | "public";
+
 /**
- * Floating feedback button. Opens a modal where any signed-in user can log
- * a "challenge" — a friction point, bug, missing feature, question, or idea.
- * Submissions go to the `/classroom/challenges` triage board.
+ * Floating feedback button. Opens a modal where any user — signed in or
+ * not — can log a "challenge" (a friction point, bug, missing feature,
+ * question, or idea).
+ *
+ * Authenticated users get the full 2000-char form (endpoint `/api/challenges`).
+ * Public users get a simplified modal that asks for email + name + body + tag
+ * and posts to `/api/challenges/public`, which applies honeypot and rate limits.
  */
 export function ChallengeButton() {
   const { data: session } = useSession();
@@ -30,7 +36,15 @@ export function ChallengeButton() {
   const [open, setOpen] = useState(false);
   const [tag, setTag] = useState<Tag>("confusing");
   const [body, setBody] = useState("");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  // Honeypot — must stay empty. Rendered visually hidden so real users
+  // can't fill it, while naive bots will populate every <input>.
+  const [website, setWebsite] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const mode: Mode = session?.user ? "authed" : "public";
+  const bodyCap = mode === "authed" ? 2000 : 1000;
 
   useEffect(() => {
     if (!open) return;
@@ -41,32 +55,63 @@ export function ChallengeButton() {
     return () => window.removeEventListener("keydown", onEsc);
   }, [open]);
 
+  function resetFields() {
+    setBody("");
+    setEmail("");
+    setName("");
+    setWebsite("");
+  }
+
   async function submit() {
     const trimmed = body.trim();
     if (trimmed.length < 3) {
       toast.push({ tone: "error", message: "Please write a few words." });
       return;
     }
+    if (mode === "public") {
+      const emailTrimmed = email.trim();
+      if (!emailTrimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed)) {
+        toast.push({
+          tone: "error",
+          message: "Please enter a valid email so we can credit your feedback.",
+        });
+        return;
+      }
+    }
+
     setSubmitting(true);
-    // Extract program + lesson from pathnames shaped like
-    // /learn/<program>/<lesson>. Program overview pages (/learn/<program>)
-    // only yield a program_slug. Pathnames outside /learn yield neither.
     const learnMatch = pathname?.match(
       /^\/learn\/([^/]+)(?:\/([^/]+))?\/?$/,
     );
     const programSlug = learnMatch?.[1] ?? null;
     const lessonSlug = learnMatch?.[2] ?? null;
+    const pageUrl = typeof window !== "undefined" ? window.location.href : null;
     try {
-      const res = await fetch("/api/challenges", {
+      const endpoint =
+        mode === "authed" ? "/api/challenges" : "/api/challenges/public";
+      const payload =
+        mode === "authed"
+          ? {
+              body: trimmed,
+              tag,
+              page_url: pageUrl,
+              program_slug: programSlug,
+              lesson_slug: lessonSlug,
+            }
+          : {
+              email: email.trim(),
+              name: name.trim() || null,
+              body: trimmed,
+              tag,
+              page_url: pageUrl,
+              program_slug: programSlug,
+              lesson_slug: lessonSlug,
+              website,
+            };
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          body: trimmed,
-          tag,
-          page_url: typeof window !== "undefined" ? window.location.href : null,
-          program_slug: programSlug,
-          lesson_slug: lessonSlug,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const msg = await res.text().catch(() => "");
@@ -74,9 +119,12 @@ export function ChallengeButton() {
       }
       toast.push({
         tone: "success",
-        message: "Logged. Thanks — this goes straight to the build list.",
+        message:
+          mode === "public"
+            ? "Thanks! Your feedback goes straight to the triage board."
+            : "Logged. Thanks — this goes straight to the build list.",
       });
-      setBody("");
+      resetFields();
       setOpen(false);
     } catch (err) {
       toast.push({
@@ -90,26 +138,21 @@ export function ChallengeButton() {
     }
   }
 
-  if (!session?.user) {
-    // Show the button but kick unauthenticated users to sign-in.
-    return (
-      <button
-        type="button"
-        onClick={() => signIn()}
-        className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-indigo-500/40 bg-zinc-950/80 px-4 py-2 text-sm font-medium text-indigo-200 shadow-2xl shadow-indigo-500/20 backdrop-blur transition hover:bg-zinc-900"
-      >
-        <Megaphone className="h-4 w-4" />
-        Log a challenge
-      </button>
-    );
-  }
+  const handleLabel =
+    mode === "authed"
+      ? `@${session?.user?.name ?? session?.user?.email?.split("@")[0] ?? "you"}`
+      : name.trim() || (email.includes("@") ? `@${email.split("@")[0]}` : "@guest");
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="sof-lift fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-white shadow-2xl shadow-indigo-500/30 transition hover:brightness-110"
+        className={
+          mode === "authed"
+            ? "sof-lift fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-white shadow-2xl shadow-indigo-500/30 transition hover:brightness-110"
+            : "fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-indigo-500/40 bg-zinc-950/80 px-4 py-2 text-sm font-medium text-indigo-200 shadow-2xl shadow-indigo-500/20 backdrop-blur transition hover:bg-zinc-900"
+        }
       >
         <Megaphone className="h-4 w-4" />
         Log a challenge
@@ -147,6 +190,81 @@ export function ChallengeButton() {
                 feature, a question, a design idea. Every entry goes on the
                 triage board and shapes what ships next.
               </p>
+
+              {mode === "public" && (
+                <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-[11px] text-indigo-200">
+                  Want full access?{" "}
+                  <button
+                    type="button"
+                    onClick={() => signIn()}
+                    className="underline hover:text-white"
+                  >
+                    Sign in
+                  </button>{" "}
+                  to track your feedback and earn Educoin.{" "}
+                  <Link href="/signin" className="underline hover:text-white">
+                    Create an account
+                  </Link>
+                  .
+                </div>
+              )}
+
+              {mode === "public" && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="challenge-email"
+                      className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500"
+                    >
+                      Email
+                    </label>
+                    <input
+                      id="challenge-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="challenge-name"
+                      className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500"
+                    >
+                      Name (optional)
+                    </label>
+                    <input
+                      id="challenge-name"
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Ada Lovelace"
+                      className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {mode === "public" && (
+                // Honeypot — visually hidden but kept out of the tab order
+                // and flagged to accessibility tech. A bot that fills every
+                // input will trip it; real users won't even see it.
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-[-9999px] top-[-9999px] h-0 w-0 opacity-0"
+                >
+                  <label htmlFor="challenge-website">Website</label>
+                  <input
+                    id="challenge-website"
+                    type="text"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -186,17 +304,18 @@ export function ChallengeButton() {
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   rows={4}
+                  maxLength={bodyCap}
                   placeholder="One sentence is enough. What tripped you up?"
                   className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-500">
                   <span>
                     You&apos;re logging as{" "}
-                    <span className="text-zinc-300">
-                      @{session.user.name ?? session.user.email?.split("@")[0]}
-                    </span>
+                    <span className="text-zinc-300">{handleLabel}</span>
                   </span>
-                  <span>{body.length}/2000</span>
+                  <span>
+                    {body.length}/{bodyCap}
+                  </span>
                 </div>
               </div>
             </div>
