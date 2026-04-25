@@ -205,9 +205,14 @@ export function splitReview(text: string): ReviewSplit {
   // but the captured group is empty (model emitted just "# SUMMARY\n\n…"),
   // we fall through to the firstPara fallback so the displayed summary
   // is always something the reader can scan.
+  // The `:?` after the word boundary consumes a colon the model already
+  // emitted, so "# SUMMARY: foo" normalises to "SUMMARY: foo" rather than
+  // "SUMMARY:: foo" (which would leave a leading ":" on the captured
+  // summary). Same for the bold form: "**SUMMARY:**" or "**SUMMARY**:"
+  // both collapse to a single canonical "SUMMARY:" label.
   const norm = cleaned
-    .replace(/^[ \t]*#{1,6}[ \t]*(SUMMARY|BODY)\b/gim, "$1:")
-    .replace(/\*\*\s*(SUMMARY|BODY)\s*\*\*/gi, "$1:");
+    .replace(/^[ \t]*#{1,6}[ \t]*(SUMMARY|BODY)\b:?/gim, "$1:")
+    .replace(/\*\*\s*(SUMMARY|BODY)\s*\*\*:?/gi, "$1:");
 
   const summaryMatch = norm.match(
     /\bSUMMARY:\s*([\s\S]*?)(?:\n\s*BODY:|$)/i,
