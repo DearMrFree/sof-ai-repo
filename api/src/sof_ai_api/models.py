@@ -438,6 +438,50 @@ class AgentApplicationReview(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class ApplicationLike(SQLModel, table=True):
+    """A signed-in user upvoting a publicly-listed application.
+
+    Likes only count when ``AgentApplication.public_listing == True`` —
+    private applications can't accumulate signal. Unique on
+    (application_id, user_id) so a user can't farm the count.
+
+    Devin folds the like total into the vet recommendation it sends to
+    the trio: more public signal → stronger nudge in the recommendation
+    paragraph (likes don't *replace* the trio, they inform it).
+    """
+
+    __table_args__ = (
+        UniqueConstraint("application_id", "user_id", name="uq_application_user_like"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(index=True)
+    user_id: str = Field(max_length=200, index=True)
+    user_name: str = Field(default="", max_length=200)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class ApplicationComment(SQLModel, table=True):
+    """A signed-in user's public comment on an application.
+
+    Comments form a flat thread on /apply/public. The substantive count
+    (≥ N words for some threshold N) feeds into Devin's vet
+    recommendation as the "community discussion" signal.
+
+    No unique constraint — users can comment multiple times. Soft-delete
+    via ``hidden=True`` so we keep audit trail; production moderation
+    UI can flip the flag.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(index=True)
+    user_id: str = Field(max_length=200, index=True)
+    user_name: str = Field(default="", max_length=200)
+    body: str = Field(default="")
+    hidden: bool = Field(default=False, index=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 

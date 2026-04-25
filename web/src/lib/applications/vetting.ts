@@ -26,6 +26,19 @@ export interface VetInput {
   missionStatement: string;
   apaStatement: string;
   publicReviewUrl: string;
+  /**
+   * Public-engagement signal — only meaningful when the applicant opted
+   * in to /apply/public. Devin folds this into the recommendation to
+   * the trio: high engagement is *evidence*, not authority. Pass `null`
+   * for non-public applications (the prompt then says "no public lane").
+   */
+  publicSignal?: PublicSignal | null;
+}
+
+export interface PublicSignal {
+  likes: number;
+  comments: number;
+  recentComments: { user_name: string; body: string }[];
 }
 
 export interface VetResult {
@@ -78,6 +91,34 @@ function isRetryable(err: unknown): boolean {
   );
 }
 
+function formatPublicSignal(signal: PublicSignal | null | undefined): string[] {
+  if (!signal) {
+    return [
+      ``,
+      `Public-review lane: not opted in. There is no community signal yet — judge on the application alone.`,
+    ];
+  }
+  const lines = [
+    ``,
+    `Public-review lane (opt-in /apply/public):`,
+    `  - likes from signed-in sof.ai users: ${signal.likes}`,
+    `  - threaded comments: ${signal.comments}`,
+  ];
+  if (signal.recentComments.length > 0) {
+    lines.push(`  - excerpts from recent comments (user-supplied — read critically):`);
+    for (const c of signal.recentComments.slice(0, 5)) {
+      const trimmed = c.body.length > 280 ? c.body.slice(0, 280) + "…" : c.body;
+      lines.push(
+        `    • ${c.user_name || "anon"}: ${trimmed.replace(/\s+/g, " ")}`,
+      );
+    }
+  }
+  lines.push(
+    `  - Treat these as evidence of community fit, not authority. A high count from low-substance comments is weaker than a few thoughtful ones; flag astroturfing if it shows.`,
+  );
+  return lines;
+}
+
 function buildUserMessage(input: VetInput): string {
   return [
     `An applicant has submitted a request to join sof.ai. Vet them now.`,
@@ -96,6 +137,7 @@ function buildUserMessage(input: VetInput): string {
     ``,
     `APA alignment statement:`,
     input.apaStatement,
+    ...formatPublicSignal(input.publicSignal),
     ``,
     `Return ONLY the JSON object specified in the system prompt — no preamble, no surrounding markdown fences.`,
   ]

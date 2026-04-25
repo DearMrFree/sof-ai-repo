@@ -265,3 +265,118 @@ def test_submit_validates_min_length_on_pitch_fields() -> None:
     }
     r = client.post("/applications", json=body)
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Public-engagement: likes + comments
+# ---------------------------------------------------------------------------
+
+
+def _submit_public(email: str = "public@acme.example") -> dict:
+    a = _submit(email=email, public_listing=True)
+    assert a["public_listing"] is True
+    assert a["likes_count"] == 0
+    assert a["comments_count"] == 0
+    return a
+
+
+def test_like_only_works_on_public_listings() -> None:
+    """Private (non-opt-in) applications can't accumulate community signal.
+
+    Even when internal-auth is satisfied the route returns 403 when
+    ``public_listing=False`` because the applicant didn't ask for public
+    review. Tests run with INTERNAL_API_KEY unset so the auth gate is open;
+    the 403 here comes from `_require_public`, not the auth dep.
+    """
+    a = _submit(email="private@acme.example", public_listing=False)
+    r = client.post(
+        f"/applications/{a['id']}/like",
+        json={"user_id": "user:alice", "user_name": "Alice"},
+    )
+    assert r.status_code == 403, r.text
+    detail = client.get(f"/applications/{a['id']}")
+    assert detail.json()["likes_count"] == 0
+
+
+def test_like_idempotent_double_like() -> None:
+    a = _submit_public(email="like-idem@acme.example")
+    body = {"user_id": "user:alice", "user_name": "Alice"}
+    r1 = client.post(f"/applications/{a['id']}/like", json=body)
+    r2 = client.post(f"/applications/{a['id']}/like", json=body)
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["likes_count"] == 1
+    assert r2.json()["likes_count"] == 1
+
+
+def test_likes_count_reflects_distinct_users() -> None:
+    a = _submit_public(email="like-many@acme.example")
+    for uid in ["user:alice", "user:bob", "user:carol"]:
+        r = client.post(
+            f"/applications/{a['id']}/like",
+            json={"user_id": uid, "user_name": uid.split(":", 1)[1].title()},
+        )
+        assert r.status_code == 200
+    detail = client.get(f"/applications/{a['id']}")
+    assert detail.json()["likes_count"] == 3
+
+
+def test_unlike_removes_like() -> None:
+    a = _submit_public(email="unlike@acme.example")
+    r = client.post(
+        f"/applications/{a['id']}/like",
+        json={"user_id": "user:alice", "user_name": "Alice"},
+    )
+    assert r.status_code == 200
+    assert r.json()["likes_count"] == 1
+    r2 = client.delete(f"/applications/{a['id']}/like?user_id=user:alice")
+    assert r2.status_code == 200
+    assert r2.json()["likes_count"] == 0
+
+
+def test_comment_returns_201_and_is_listed() -> None:
+    a = _submit_public(email="comment@acme.example")
+    body = {
+        "user_id": "user:alice",
+        "user_name": "Alice",
+        "body": "I think this agent's mission alignment is exemplary.",
+    }
+    r = client.post(f"/applications/{a['id']}/comments", json=body)
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["body"] == body["body"]
+    assert out["user_id"] == body["user_id"]
+
+    listed = client.get(f"/applications/{a['id']}/comments")
+    assert listed.status_code == 200
+    bodies = [c["body"] for c in listed.json()]
+    assert body["body"] in bodies
+
+    detail = client.get(f"/applications/{a['id']}")
+    assert detail.json()["comments_count"] == 1
+    assert detail.json()["comments"][0]["body"] == body["body"]
+
+
+def test_comment_blocked_on_private_application() -> None:
+    a = _submit(email="comment-private@acme.example", public_listing=False)
+    r = client.post(
+        f"/applications/{a['id']}/comments",
+        json={"user_id": "user:alice", "user_name": "Alice", "body": "test"},
+    )
+    assert r.status_code == 403
+
+
+def test_list_applications_includes_engagement_counts() -> None:
+    a = _submit_public(email="counts-list@acme.example")
+    client.post(
+        f"/applications/{a['id']}/like",
+        json={"user_id": "user:alice", "user_name": "Alice"},
+    )
+    client.post(
+        f"/applications/{a['id']}/comments",
+        json={"user_id": "user:bob", "user_name": "Bob", "body": "supportive note"},
+    )
+    listed = client.get("/applications?public_only=true").json()
+    row = next(r for r in listed if r["id"] == a["id"])
+    assert row["likes_count"] == 1
+    assert row["comments_count"] == 1

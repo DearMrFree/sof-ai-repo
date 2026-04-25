@@ -35,7 +35,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..db import get_session
-from ..models import AgentApplication, AgentApplicationReview, _utcnow
+from ..models import (
+    AgentApplication,
+    AgentApplicationReview,
+    ApplicationComment,
+    ApplicationLike,
+    _utcnow,
+)
 from .wallet import require_internal_auth
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -104,6 +110,9 @@ class ApplicationOut(BaseModel):
     final_decision_at: Optional[str]
     final_reasoning: str
     submitted_at: str
+    # Public-engagement signal — only meaningful for opt-in public listings.
+    likes_count: int = 0
+    comments_count: int = 0
 
 
 class ReviewOut(BaseModel):
@@ -116,8 +125,33 @@ class ReviewOut(BaseModel):
     created_at: str
 
 
+class CommentOut(BaseModel):
+    id: int
+    application_id: int
+    user_id: str
+    user_name: str
+    body: str
+    created_at: str
+
+
+class LikeIn(BaseModel):
+    """Authenticated user upvoting an application."""
+
+    user_id: str = Field(..., min_length=1, max_length=200)
+    user_name: str = Field(default="", max_length=200)
+
+
+class CommentIn(BaseModel):
+    """Authenticated user posting a comment thread on an application."""
+
+    user_id: str = Field(..., min_length=1, max_length=200)
+    user_name: str = Field(default="", max_length=200)
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
 class ApplicationDetailOut(ApplicationOut):
     reviews: list[ReviewOut]
+    comments: list[CommentOut] = []
 
 
 class VetIn(BaseModel):
@@ -159,7 +193,40 @@ class FinalizeIn(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _serialize_application(a: AgentApplication) -> ApplicationOut:
+def _count_engagement(
+    session: Session, application_ids: list[int]
+) -> tuple[dict[int, int], dict[int, int]]:
+    """Return (likes_by_app_id, comments_by_app_id) for the given app IDs.
+
+    Comments are filtered to ``hidden=False`` so soft-deleted ones don't
+    inflate the public count or feed false signal into Devin's vet.
+    """
+    if not application_ids:
+        return {}, {}
+    likes: dict[int, int] = {aid: 0 for aid in application_ids}
+    for like in session.exec(
+        select(ApplicationLike).where(
+            ApplicationLike.application_id.in_(application_ids)  # type: ignore[attr-defined]
+        )
+    ).all():
+        likes[like.application_id] = likes.get(like.application_id, 0) + 1
+    comments: dict[int, int] = {aid: 0 for aid in application_ids}
+    for c in session.exec(
+        select(ApplicationComment).where(
+            ApplicationComment.application_id.in_(application_ids),  # type: ignore[attr-defined]
+            ApplicationComment.hidden == False,  # noqa: E712
+        )
+    ).all():
+        comments[c.application_id] = comments.get(c.application_id, 0) + 1
+    return likes, comments
+
+
+def _serialize_application(
+    a: AgentApplication,
+    *,
+    likes_count: int = 0,
+    comments_count: int = 0,
+) -> ApplicationOut:
     return ApplicationOut(
         id=a.id or 0,
         applicant_kind=a.applicant_kind,
@@ -183,6 +250,19 @@ def _serialize_application(a: AgentApplication) -> ApplicationOut:
         else None,
         final_reasoning=a.final_reasoning,
         submitted_at=a.submitted_at.isoformat(),
+        likes_count=likes_count,
+        comments_count=comments_count,
+    )
+
+
+def _serialize_comment(c: ApplicationComment) -> CommentOut:
+    return CommentOut(
+        id=c.id or 0,
+        application_id=c.application_id,
+        user_id=c.user_id,
+        user_name=c.user_name,
+        body=c.body,
+        created_at=c.created_at.isoformat(),
     )
 
 
@@ -253,7 +333,15 @@ def list_applications(
     if public_only:
         stmt = stmt.where(AgentApplication.public_listing == True)  # noqa: E712
     rows = session.exec(stmt.limit(max(1, min(limit, 500)))).all()
-    return [_serialize_application(a) for a in rows]
+    likes, comments = _count_engagement(session, [a.id for a in rows if a.id])
+    return [
+        _serialize_application(
+            a,
+            likes_count=likes.get(a.id or 0, 0),
+            comments_count=comments.get(a.id or 0, 0),
+        )
+        for a in rows
+    ]
 
 
 @router.get("/{application_id}", response_model=ApplicationDetailOut)
@@ -269,10 +357,30 @@ def get_application(
         .where(AgentApplicationReview.application_id == application_id)
         .order_by(AgentApplicationReview.created_at.asc())
     ).all()
-    base = _serialize_application(application)
+    comments = session.exec(
+        select(ApplicationComment)
+        .where(
+            ApplicationComment.application_id == application_id,
+            ApplicationComment.hidden == False,  # noqa: E712
+        )
+        .order_by(ApplicationComment.created_at.asc())
+    ).all()
+    likes_count = len(
+        session.exec(
+            select(ApplicationLike).where(
+                ApplicationLike.application_id == application_id
+            )
+        ).all()
+    )
+    base = _serialize_application(
+        application,
+        likes_count=likes_count,
+        comments_count=len(comments),
+    )
     return ApplicationDetailOut(
         **base.model_dump(),
         reviews=[_serialize_review(r) for r in reviews],
+        comments=[_serialize_comment(c) for c in comments],
     )
 
 
@@ -452,3 +560,193 @@ def finalize_application(
     session.commit()
     session.refresh(application)
     return _serialize_application(application)
+
+
+# ---------------------------------------------------------------------------
+# Public-engagement: likes + comments on opt-in public listings
+# ---------------------------------------------------------------------------
+
+
+def _require_public(application: AgentApplication) -> None:
+    """Likes/comments are only available on opt-in public applications.
+
+    Private applications can still be viewed by their applicant + the
+    trio + admin, but they don't accumulate community signal because
+    the applicant didn't ask for it.
+    """
+    if not application.public_listing:
+        raise HTTPException(
+            status_code=403,
+            detail="This application is not opted-in to public review.",
+        )
+
+
+@router.post(
+    "/{application_id}/like",
+    response_model=ApplicationOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def like_application(
+    application_id: int,
+    body: LikeIn,
+    session: Session = Depends(get_session),
+) -> ApplicationOut:
+    """Authenticated user upvotes a publicly-listed application.
+
+    Idempotent: liking twice is a no-op (unique constraint on
+    (application_id, user_id) plus IntegrityError-tolerant insert).
+    """
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    _require_public(application)
+
+    user_id = body.user_id.strip()
+    user_name = body.user_name.strip()
+
+    existing = session.exec(
+        select(ApplicationLike).where(
+            ApplicationLike.application_id == application_id,
+            ApplicationLike.user_id == user_id,
+        )
+    ).first()
+    if not existing:
+        try:
+            session.add(
+                ApplicationLike(
+                    application_id=application_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                )
+            )
+            session.commit()
+        except IntegrityError:
+            session.rollback()  # concurrent like; still a no-op outcome.
+
+    likes_count = len(
+        session.exec(
+            select(ApplicationLike).where(
+                ApplicationLike.application_id == application_id
+            )
+        ).all()
+    )
+    comments_count = len(
+        session.exec(
+            select(ApplicationComment).where(
+                ApplicationComment.application_id == application_id,
+                ApplicationComment.hidden == False,  # noqa: E712
+            )
+        ).all()
+    )
+    return _serialize_application(
+        application,
+        likes_count=likes_count,
+        comments_count=comments_count,
+    )
+
+
+@router.delete(
+    "/{application_id}/like",
+    response_model=ApplicationOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def unlike_application(
+    application_id: int,
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> ApplicationOut:
+    """Authenticated user removes their like.
+
+    Public-only — same gate as like.
+    """
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    _require_public(application)
+
+    existing = session.exec(
+        select(ApplicationLike).where(
+            ApplicationLike.application_id == application_id,
+            ApplicationLike.user_id == user_id.strip(),
+        )
+    ).first()
+    if existing:
+        session.delete(existing)
+        session.commit()
+
+    likes_count = len(
+        session.exec(
+            select(ApplicationLike).where(
+                ApplicationLike.application_id == application_id
+            )
+        ).all()
+    )
+    comments_count = len(
+        session.exec(
+            select(ApplicationComment).where(
+                ApplicationComment.application_id == application_id,
+                ApplicationComment.hidden == False,  # noqa: E712
+            )
+        ).all()
+    )
+    return _serialize_application(
+        application,
+        likes_count=likes_count,
+        comments_count=comments_count,
+    )
+
+
+@router.post(
+    "/{application_id}/comments",
+    response_model=CommentOut,
+    status_code=201,
+    dependencies=[Depends(require_internal_auth)],
+)
+def post_comment(
+    application_id: int,
+    body: CommentIn,
+    session: Session = Depends(get_session),
+) -> CommentOut:
+    """Authenticated user posts a comment on a public application."""
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    _require_public(application)
+
+    body_text = body.body.strip()
+    if not body_text:
+        raise HTTPException(status_code=422, detail="comment body is empty")
+
+    comment = ApplicationComment(
+        application_id=application_id,
+        user_id=body.user_id.strip(),
+        user_name=body.user_name.strip(),
+        body=body_text,
+    )
+    session.add(comment)
+    session.commit()
+    session.refresh(comment)
+    return _serialize_comment(comment)
+
+
+@router.get(
+    "/{application_id}/comments",
+    response_model=list[CommentOut],
+)
+def list_comments(
+    application_id: int,
+    session: Session = Depends(get_session),
+) -> list[CommentOut]:
+    """Public list of comments on an application (hides soft-deleted ones)."""
+    application = session.get(AgentApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="application not found")
+    rows = session.exec(
+        select(ApplicationComment)
+        .where(
+            ApplicationComment.application_id == application_id,
+            ApplicationComment.hidden == False,  # noqa: E712
+        )
+        .order_by(ApplicationComment.created_at.asc())
+    ).all()
+    return [_serialize_comment(c) for c in rows]
