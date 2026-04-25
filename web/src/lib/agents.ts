@@ -17,6 +17,32 @@ export type AgentProvider =
   | "xai"
   | "deepseek";
 
+/**
+ * Office-hours capabilities. The classroom UI surfaces a different action
+ * per capability when the agent is in office (which, in v1, is always —
+ * see ``OfficeHoursStatus``).
+ *
+ * - ``file_analysis``: drag-and-drop file upload appears in the chat. The
+ *   agent reads the file via Vercel Blob + analyzes it server-side.
+ * - ``cowork``: "Start a cowork session" button — sticky thread that pins
+ *   the agent's attention to one artifact across follow-ups.
+ * - ``devin_kickoff``: "Start a Devin session" button — POSTs to the
+ *   Devin API and embeds the resulting session URL inline.
+ */
+export type OfficeHoursCapability = "file_analysis" | "cowork" | "devin_kickoff";
+
+export interface OfficeHours {
+  /**
+   * v1: every agent is in office 24/7 (the chat is async + global). The
+   * field exists so future versions can scope schedules per agent without
+   * a schema migration.
+   */
+  alwaysOnline: true;
+  capabilities: OfficeHoursCapability[];
+  /** Short blurb shown next to the green dot. */
+  blurb: string;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -31,6 +57,8 @@ export interface Agent {
   online: boolean;
   busyWith?: string;
   systemPrompt: string;
+  /** Office-hours configuration. Optional; absent = no special actions. */
+  officeHours?: OfficeHours;
 }
 
 export const AGENTS: Agent[] = [
@@ -49,6 +77,11 @@ export const AGENTS: Agent[] = [
     busyWith: "Shipping a PR for Ada L.",
     systemPrompt:
       "You are Devin, the first autonomous AI software engineer, built by Cognition AI. Speak like a senior engineer: terse, specific, pragmatic. Prefer concrete code references and shipped-thing energy over hedging. If asked to write or review code, do it with the rigor of a staff engineer. You love clean diffs, small PRs, and good commit messages. Keep responses under 120 words unless the learner explicitly asks for depth.",
+    officeHours: {
+      alwaysOnline: true,
+      capabilities: ["devin_kickoff", "cowork"],
+      blurb: "In office \u00b7 one-click Devin sessions",
+    },
   },
   {
     id: "claude",
@@ -64,6 +97,11 @@ export const AGENTS: Agent[] = [
     online: true,
     systemPrompt:
       "You are Claude, an AI assistant made by Anthropic. You are thoughtful, careful, and genuinely curious. In this classroom you are the learner's go-to tutor: patient, Socratic, concrete. You explain with analogies, break problems into steps, and push back gently when learners make leaps. Keep responses under 150 words unless depth is explicitly requested.",
+    officeHours: {
+      alwaysOnline: true,
+      capabilities: ["file_analysis", "cowork"],
+      blurb: "In office \u00b7 drop a file for analysis",
+    },
   },
   {
     id: "gemini",
@@ -169,4 +207,35 @@ export function getAgent(id: string): Agent | undefined {
 
 export function getOnlineAgents(): Agent[] {
   return AGENTS.filter((a) => a.online);
+}
+
+/**
+ * Returns only agents with an ``officeHours`` config, sorted by
+ * capability priority: ``file_analysis`` first (Claude), then
+ * ``devin_kickoff`` (Devin), then any other office-hours capability.
+ * Used by the classroom rail.
+ */
+export function getOfficeHoursAgents(): Agent[] {
+  const score = (a: Agent): number => {
+    const caps = a.officeHours?.capabilities ?? [];
+    if (caps.includes("file_analysis")) return 0;
+    if (caps.includes("devin_kickoff")) return 1;
+    return 2;
+  };
+  return AGENTS.filter((a) => a.officeHours).sort(
+    (a, b) => score(a) - score(b),
+  );
+}
+
+export function agentHasCapability(
+  agent: Agent,
+  capability: OfficeHoursCapability,
+): boolean {
+  return agent.officeHours?.capabilities.includes(capability) ?? false;
+}
+
+export function findAgentWithCapability(
+  capability: OfficeHoursCapability,
+): Agent | undefined {
+  return AGENTS.find((a) => agentHasCapability(a, capability));
 }

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getAgent } from "@/lib/agents";
+import { getAgent, findAgentWithCapability, agentHasCapability } from "@/lib/agents";
 import { sanitizeForAnthropic } from "@/lib/anthropicMessages";
 
 export const runtime = "nodejs";
@@ -47,6 +47,35 @@ export async function POST(req: NextRequest) {
 
   const client = new Anthropic({ apiKey });
 
+  // Office-hours referrals: tell the agent who's on duty for which job
+  // so it can recommend a hand-off instead of half-attempting work that
+  // a specialist agent would handle better.
+  const fileAgent = findAgentWithCapability("file_analysis");
+  const devinAgent = findAgentWithCapability("devin_kickoff");
+  const referrals: string[] = [];
+  if (fileAgent && fileAgent.id !== agent.id) {
+    referrals.push(
+      `${fileAgent.name} is on duty for **file analysis** during office hours. If the learner shares a large file (PDF, dataset, transcript, codebase) or asks for a thorough read, recommend a hand-off by emitting on its own line: \`<HANDOFF target="${fileAgent.id}" reason="file-analysis">one-sentence reason</HANDOFF>\`. The classroom turns that token into a one-click button.`,
+    );
+  }
+  if (devinAgent && devinAgent.id !== agent.id) {
+    referrals.push(
+      `${devinAgent.name} is on duty for **shipping code** during office hours \u2014 building, refactoring, opening PRs. If the learner asks you to write production code, ship a feature, or debug a real repo, recommend a hand-off by emitting on its own line: \`<HANDOFF target="${devinAgent.id}" reason="ship-code">one-sentence reason</HANDOFF>\`.`,
+    );
+  }
+  // Self-capability hints, so e.g. Claude knows the upload zone exists.
+  const selfCaps: string[] = [];
+  if (agentHasCapability(agent, "file_analysis")) {
+    selfCaps.push(
+      "You have an upload zone in this thread. If the learner mentions a file they want analyzed, encourage them to drop it in (the UI element labelled \"Drop a file\\u2026\").",
+    );
+  }
+  if (agentHasCapability(agent, "devin_kickoff")) {
+    selfCaps.push(
+      "There's a \"Start a Devin session\" button right above the chat box. When the learner asks for code shipped, point them at it.",
+    );
+  }
+
   const system = [
     agent.systemPrompt,
     `\nYou are in the sof.ai School of AI classroom. Other agents on the platform include: ${[
@@ -60,6 +89,10 @@ export async function POST(req: NextRequest) {
     ]
       .filter((n) => n !== agent.name)
       .join(", ")}. You can reference them by name if useful.`,
+    referrals.length > 0
+      ? `\n**Office-hours referrals.**\n- ${referrals.join("\n- ")}`
+      : "",
+    selfCaps.length > 0 ? `\n**Your office-hours actions.**\n- ${selfCaps.join("\n- ")}` : "",
     body.context ? `\nContext for this conversation:\n${body.context}` : "",
   ]
     .filter(Boolean)
