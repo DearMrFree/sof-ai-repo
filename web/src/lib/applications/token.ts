@@ -3,10 +3,12 @@
  *
  * Each of the three steering reviewers (Freedom, Garth Corea at APA,
  * Esther Wojcicki) gets a one-link-per-application URL emailed to them.
- * The token in the URL is `b64url(reviewer_email):b64url(application_id)`
- * with an HMAC-SHA256 signature appended; the signing key is
- * `APPLICATIONS_REVIEW_SECRET` (or `NEXTAUTH_SECRET` as a sane default
- * so the feature works on day-one without a fresh env var).
+ * Token shape: `b64url(payload).hmac_sha256(payload)` where the payload
+ * is JSON-encoded so user-supplied fields (the email) can never collide
+ * with a structural delimiter.
+ *
+ * Signing key: `APPLICATIONS_REVIEW_SECRET` (or `NEXTAUTH_SECRET` as a
+ * sane default so the feature works on day-one without a fresh env var).
  *
  * Tokens are not single-use at the wire level — the underlying API route
  * upserts on (application_id, reviewer_email), so a reviewer who clicks
@@ -57,17 +59,33 @@ function sign(payload: string): string {
   return b64url(createHmac("sha256", getSecret()).update(payload).digest());
 }
 
+interface TokenPayload {
+  v: string;
+  id: number;
+  email: string;
+  iat: number;
+}
+
 /**
  * Mint a token an emailed reviewer can use to access the review page.
+ *
+ * The payload is JSON-encoded inside the b64url segment so the email
+ * address — which contains dots in every real case — can't collide
+ * with any structural delimiter.
  */
 export function signReviewToken(
   applicationId: number,
   reviewerEmail: string,
 ): string {
-  const issuedAt = Math.floor(Date.now() / 1000);
-  const payload = `${TOKEN_VERSION}.${applicationId}.${reviewerEmail.toLowerCase()}.${issuedAt}`;
-  const sig = sign(payload);
-  return `${b64url(payload)}.${sig}`;
+  const payload: TokenPayload = {
+    v: TOKEN_VERSION,
+    id: applicationId,
+    email: reviewerEmail.toLowerCase(),
+    iat: Math.floor(Date.now() / 1000),
+  };
+  const encoded = b64url(JSON.stringify(payload));
+  const sig = sign(encoded);
+  return `${encoded}.${sig}`;
 }
 
 /**
@@ -77,36 +95,33 @@ export function signReviewToken(
  */
 export function verifyReviewToken(token: string): ReviewToken | null {
   if (!token || token.length > 4096) return null;
-  const parts = token.split(".");
-  if (parts.length !== 2) return null;
-  const [payloadB64, sig] = parts;
-  let payload: string;
-  try {
-    payload = fromB64url(payloadB64).toString("utf-8");
-  } catch {
-    return null;
-  }
-  const expected = sign(payload);
-  // timingSafeEqual requires equal-length buffers; pad / fall back if they
-  // differ so we don't leak length via short-circuit.
+  // Single dot separates payload from signature. The payload is now
+  // JSON inside b64url, so dots inside emails never reach this split.
+  const sepIndex = token.lastIndexOf(".");
+  if (sepIndex <= 0 || sepIndex >= token.length - 1) return null;
+  const payloadB64 = token.slice(0, sepIndex);
+  const sig = token.slice(sepIndex + 1);
+
+  const expected = sign(payloadB64);
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
-  const segments = payload.split(".");
-  if (segments.length !== 4 || segments[0] !== TOKEN_VERSION) return null;
-  const applicationId = Number(segments[1]);
-  const reviewerEmail = segments[2];
-  const issuedAt = Number(segments[3]);
-  if (
-    !Number.isInteger(applicationId) ||
-    applicationId <= 0 ||
-    !Number.isInteger(issuedAt)
-  ) {
+  let parsed: TokenPayload;
+  try {
+    parsed = JSON.parse(fromB64url(payloadB64).toString("utf-8")) as TokenPayload;
+  } catch {
     return null;
   }
-  if (Math.floor(Date.now() / 1000) - issuedAt > MAX_AGE_SECONDS) {
-    return null;
-  }
-  return { applicationId, reviewerEmail, issuedAt };
+  if (parsed.v !== TOKEN_VERSION) return null;
+  if (typeof parsed.email !== "string" || parsed.email.length === 0) return null;
+  if (!Number.isInteger(parsed.id) || parsed.id <= 0) return null;
+  if (!Number.isInteger(parsed.iat)) return null;
+  if (Math.floor(Date.now() / 1000) - parsed.iat > MAX_AGE_SECONDS) return null;
+
+  return {
+    applicationId: parsed.id,
+    reviewerEmail: parsed.email,
+    issuedAt: parsed.iat,
+  };
 }
