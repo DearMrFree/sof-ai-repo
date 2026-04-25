@@ -227,7 +227,7 @@ async function runAnthropicReview(
   }
   const client = new Anthropic({ apiKey });
   const resp = await client.messages.create({
-    model: "claude-3-5-sonnet-latest",
+    model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
     max_tokens: 2048,
     system,
     messages: [{ role: "user", content: userMessage }],
@@ -254,9 +254,10 @@ async function runGeminiReview(
       userMessage,
     );
   }
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-pro";
   const url =
     "https://generativelanguage.googleapis.com/v1beta/models/" +
-    "gemini-1.5-pro-latest:generateContent?key=" +
+    `${model}:generateContent?key=` +
     encodeURIComponent(apiKey);
   const res = await fetch(url, {
     method: "POST",
