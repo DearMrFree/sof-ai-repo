@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/applications/cron/auto-renew",
+      "schedule": "0 8 * * *"
+    }
+  ]
+}

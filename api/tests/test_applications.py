@@ -579,3 +579,167 @@ def test_impact_summary_aggregates_beyond_list_cap() -> None:
     assert body["impact"]["weighted"] == 105.0
     # Rendered list still capped at 100 for pagination
     assert len(body["contributions"]) == 100
+
+
+# ---------------------------------------------------------------------------
+# Phase 2c: 30-day renewal cron
+# ---------------------------------------------------------------------------
+
+
+def _cond_accept(application_id: int, *, age_days: int = 35) -> None:
+    """Drive the application all the way to conditionally_accepted, then
+    backdate ``final_decision_at`` so the cron sees it as ripe.
+    """
+    _force_status(application_id, "trio_reviewing")
+    for email, name in [
+        ("freedom@thevrschool.org", "Freedom"),
+        ("gcorea@apa.org", "Garth"),
+        ("ewojcicki@gmail.com", "Esther"),
+    ]:
+        r = client.post(
+            f"/applications/{application_id}/review",
+            json={
+                "reviewer_email": email,
+                "reviewer_name": name,
+                "vote": "yes",
+                "comment": "lgtm",
+            },
+        )
+        assert r.status_code == 200, r.text
+    r = client.post(
+        f"/applications/{application_id}/finalize",
+        json={
+            "final_decision": "conditionally_accepted",
+            "final_reasoning": "3-yes",
+        },
+    )
+    assert r.status_code == 200, r.text
+    # Backdate final_decision_at so the cron sees the 30-day window
+    # has elapsed.
+    from datetime import timedelta
+
+    from sof_ai_api.db import get_session
+    from sof_ai_api.models import AgentApplication, _utcnow
+
+    sess = next(get_session())
+    try:
+        app = sess.get(AgentApplication, application_id)
+        assert app is not None
+        app.final_decision_at = _utcnow() - timedelta(days=age_days)
+        sess.add(app)
+        sess.commit()
+    finally:
+        sess.close()
+
+
+def test_auto_renew_promotes_above_threshold(monkeypatch) -> None:
+    monkeypatch.setenv("RENEWAL_THRESHOLD_WEIGHTED", "5.0")
+    monkeypatch.setenv("RENEWAL_GRAY_ZONE_LOWER", "1.0")
+    monkeypatch.setenv("RENEWAL_WINDOW_DAYS", "30")
+    a = _submit(email="renew-ok@acme.example")
+    _cond_accept(a["id"])
+    # Log a heavy contribution (weight 6.0 ≥ threshold 5.0)
+    r = client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "challenge", "summary": "huge", "weight": 6.0},
+    )
+    assert r.status_code == 201
+    r = client.post("/applications/cron/auto-renew")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["evaluated"] >= 1
+    ids = {d["application_id"] for d in body["renewed"]}
+    assert a["id"] in ids
+    # Detail surface reflects the new member_status
+    r = client.get(f"/applications/{a['id']}")
+    assert r.json()["member_status"] == "member"
+
+
+def test_auto_renew_escalates_in_gray_zone(monkeypatch) -> None:
+    monkeypatch.setenv("RENEWAL_THRESHOLD_WEIGHTED", "5.0")
+    monkeypatch.setenv("RENEWAL_GRAY_ZONE_LOWER", "1.0")
+    monkeypatch.setenv("RENEWAL_WINDOW_DAYS", "30")
+    a = _submit(email="renew-gray@acme.example")
+    _cond_accept(a["id"])
+    # Weight 2.5 ∈ [1.0, 5.0) → escalated
+    client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "skill", "summary": "ok", "weight": 2.5},
+    )
+    r = client.post("/applications/cron/auto-renew")
+    body = r.json()
+    ids = {d["application_id"] for d in body["escalated"]}
+    assert a["id"] in ids
+    r = client.get(f"/applications/{a['id']}")
+    assert r.json()["member_status"] == "escalated"
+
+
+def test_auto_renew_expires_below_gray_zone(monkeypatch) -> None:
+    monkeypatch.setenv("RENEWAL_THRESHOLD_WEIGHTED", "5.0")
+    monkeypatch.setenv("RENEWAL_GRAY_ZONE_LOWER", "1.0")
+    monkeypatch.setenv("RENEWAL_WINDOW_DAYS", "30")
+    a = _submit(email="renew-zero@acme.example")
+    _cond_accept(a["id"])
+    # No contributions logged → weighted impact 0 < 1.0 → expired
+    r = client.post("/applications/cron/auto-renew")
+    body = r.json()
+    ids = {d["application_id"] for d in body["expired"]}
+    assert a["id"] in ids
+    r = client.get(f"/applications/{a['id']}")
+    assert r.json()["member_status"] == "expired"
+
+
+def test_auto_renew_skips_under_window(monkeypatch) -> None:
+    """Applicants whose acceptance is younger than the window must NOT
+    be touched by the cron.
+    """
+    monkeypatch.setenv("RENEWAL_THRESHOLD_WEIGHTED", "5.0")
+    monkeypatch.setenv("RENEWAL_WINDOW_DAYS", "30")
+    a = _submit(email="renew-young@acme.example")
+    _cond_accept(a["id"], age_days=2)  # only 2 days old
+    r = client.post("/applications/cron/auto-renew")
+    body = r.json()
+    all_ids = (
+        {d["application_id"] for d in body["renewed"]}
+        | {d["application_id"] for d in body["escalated"]}
+        | {d["application_id"] for d in body["expired"]}
+    )
+    assert a["id"] not in all_ids
+    r = client.get(f"/applications/{a['id']}")
+    assert r.json()["member_status"] == "pending"
+
+
+def test_auto_renew_idempotent(monkeypatch) -> None:
+    """Once an applicant lands in member/expired, a second cron run
+    must not re-touch them (member_status != pending short-circuits).
+    """
+    monkeypatch.setenv("RENEWAL_THRESHOLD_WEIGHTED", "5.0")
+    monkeypatch.setenv("RENEWAL_WINDOW_DAYS", "30")
+    a = _submit(email="renew-dup@acme.example")
+    _cond_accept(a["id"])
+    client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "challenge", "summary": "x", "weight": 6.0},
+    )
+    r1 = client.post("/applications/cron/auto-renew")
+    assert {d["application_id"] for d in r1.json()["renewed"]} >= {a["id"]}
+    # Second run — applicant already a member, so should NOT appear
+    r2 = client.post("/applications/cron/auto-renew")
+    second_renewed = {d["application_id"] for d in r2.json()["renewed"]}
+    second_escalated = {d["application_id"] for d in r2.json()["escalated"]}
+    second_expired = {d["application_id"] for d in r2.json()["expired"]}
+    assert a["id"] not in (
+        second_renewed | second_escalated | second_expired
+    )
+
+
+def test_member_override_bypasses_cron() -> None:
+    a = _submit(email="override@acme.example")
+    _cond_accept(a["id"])
+    r = client.post(
+        f"/applications/{a['id']}/member-override",
+        json={"member_status": "member", "reason": "trio early-yes"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["member_status"] == "member"
+    assert r.json()["member_status_reason"] == "trio early-yes"

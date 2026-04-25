@@ -411,6 +411,20 @@ class AgentApplication(SQLModel, table=True):
     final_decision_at: Optional[datetime] = Field(default=None)
     final_reasoning: str = Field(default="")  # Devin's synthesis of the trio
     submitted_at: datetime = Field(default_factory=_utcnow)
+    # 30-day renewal cron (Phase 2c) ----------------------------------------
+    # ``conditionally_accepted`` applicants are auto-evaluated by a daily
+    # cron that sums their AgentContribution weights. Above a configurable
+    # threshold they auto-flip to ``member``; in the gray zone they
+    # ``escalated`` (re-emails the trio for a manual call); under the
+    # gray zone the conditional acceptance ``expired`` and the applicant
+    # is asked to reapply. The cron NEVER touches ``status`` directly —
+    # it only moves ``member_status``, leaving the upstream state
+    # machine (``status`` field) intact for audit.
+    member_status: str = Field(
+        default="pending", index=True
+    )  # pending | member | expired | escalated
+    member_status_at: Optional[datetime] = Field(default=None)
+    member_status_reason: str = Field(default="")
 
 
 class AgentApplicationReview(SQLModel, table=True):
