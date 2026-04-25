@@ -210,19 +210,21 @@ export function getOnlineAgents(): Agent[] {
 }
 
 /**
- * Stable ordering: agents with `file_analysis` first (Claude), then
- * `devin_kickoff` (Devin), then any other office-hours capability, then
- * the rest. Used by the classroom rail.
+ * Returns only agents with an ``officeHours`` config, sorted by
+ * capability priority: ``file_analysis`` first (Claude), then
+ * ``devin_kickoff`` (Devin), then any other office-hours capability.
+ * Used by the classroom rail.
  */
 export function getOfficeHoursAgents(): Agent[] {
   const score = (a: Agent): number => {
     const caps = a.officeHours?.capabilities ?? [];
     if (caps.includes("file_analysis")) return 0;
     if (caps.includes("devin_kickoff")) return 1;
-    if (caps.length > 0) return 2;
-    return 3;
+    return 2;
   };
-  return [...AGENTS].sort((a, b) => score(a) - score(b));
+  return AGENTS.filter((a) => a.officeHours).sort(
+    (a, b) => score(a) - score(b),
+  );
 }
 
 export function agentHasCapability(

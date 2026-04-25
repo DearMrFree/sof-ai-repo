@@ -17,6 +17,32 @@ interface AnalyzeRequest {
 }
 
 /**
+ * SSRF guard: only allow fetches to Vercel Blob domains. The default
+ * Vercel Blob CDN serves uploads at ``<store>.public.blob.vercel-storage.com``;
+ * custom blob domains are opt-in via ``BLOB_PUBLIC_HOSTNAMES`` (comma-
+ * separated). Without this check an authenticated caller could pass
+ * ``http://169.254.169.254/...`` (cloud metadata) or any internal URL
+ * and the server would fetch + reflect / embed it.
+ */
+function isAllowedBlobUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host.endsWith(".public.blob.vercel-storage.com")) return true;
+  if (host === "public.blob.vercel-storage.com") return true;
+  const extras = (process.env.BLOB_PUBLIC_HOSTNAMES ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return extras.some((h) => host === h || host.endsWith("." + h));
+}
+
+/**
  * Hard cap on bytes we pull back from Blob into memory for the Anthropic
  * call. The upload itself is uncapped (per product call) but a 50K-token
  * analysis pass is enough to surface structure / extract findings, and
@@ -79,6 +105,13 @@ export async function POST(req: NextRequest) {
   if (!agentHasCapability(agent, "file_analysis")) {
     return new Response(
       `${agent.name} doesn't run file analysis during office hours. Hand off to Claude instead.`,
+      { status: 400, headers: { "Content-Type": "text/plain" } },
+    );
+  }
+
+  if (!isAllowedBlobUrl(body.blobUrl)) {
+    return new Response(
+      "blobUrl must point to a Vercel Blob domain.",
       { status: 400, headers: { "Content-Type": "text/plain" } },
     );
   }

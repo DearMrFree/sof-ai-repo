@@ -13,7 +13,7 @@ import { Sparkles, Upload, Rocket } from "lucide-react";
  * kickoff a Devin session against right now".
  */
 export function OfficeHoursRail() {
-  const agents = getOfficeHoursAgents().filter((a) => a.officeHours);
+  const agents = getOfficeHoursAgents();
 
   if (agents.length === 0) return null;
 
