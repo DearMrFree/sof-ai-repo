@@ -353,6 +353,91 @@ class JournalIssue(SQLModel, table=True):
     ojs_sync_error: Optional[str] = Field(default=None)
 
 
+class AgentApplication(SQLModel, table=True):
+    """An application from an outside agent (or human) to join sof.ai.
+
+    Three lanes share one row:
+      - ``independent_agent``: a human-built / open-source AI applying directly
+      - ``company_ai``: an org onboarding their AI product
+      - ``human_seeking``: a human who wants their own AI trained on sof.ai
+
+    The state machine:
+        submitted → vetting → vetted_pass | vetted_revise | vetted_reject
+        vetted_pass → trio_reviewing → conditionally_accepted | declined
+
+    ``vetted_reject`` and ``declined`` are terminal. ``vetted_revise`` lets the
+    applicant resubmit (we just clear vet_* and put them back in ``submitted``).
+
+    Devin runs the first-pass vet (``vet_status``); the trio (Freedom + Garth
+    Corea + Esther Wojcicki) cast yes/no/maybe votes; Devin synthesizes those
+    votes into the final ``status`` (conditionally_accepted vs declined). The
+    APA's 5 ethical principles + sof.ai's mission for human flourishing are
+    baked into Devin's vetting system prompt.
+
+    No unique constraint — applicants can resubmit; we keep the history.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Identity ----------------------------------------------------------------
+    applicant_kind: str = Field(
+        index=True
+    )  # "independent_agent" | "company_ai" | "human_seeking"
+    applicant_name: str = Field(max_length=200)
+    applicant_email: str = Field(max_length=200, index=True)
+    org_name: str = Field(default="", max_length=200)
+    agent_name: str = Field(default="", max_length=200)
+    agent_url: str = Field(default="", max_length=400)
+    # Pitch -------------------------------------------------------------------
+    mission_statement: str = Field(default="")  # alignment with human flourishing
+    apa_statement: str = Field(default="")  # alignment with APA ethics principles
+    # Public-review lane (Phase 2 of the social signal). Opt-in flag —
+    # applicants can publish their pitch on /apply/public for community
+    # likes / comments before the trio votes.
+    public_review_url: str = Field(default="", max_length=400)
+    public_listing: bool = Field(default=False)
+    # Devin's first-pass vet --------------------------------------------------
+    vet_status: str = Field(
+        default="pending", index=True
+    )  # pending | passed | needs_revision | rejected
+    vet_reasoning: str = Field(default="")  # Devin's full reasoning (markdown)
+    vet_recommendation: str = Field(default="")  # short paragraph for the trio
+    vet_at: Optional[datetime] = Field(default=None)
+    # Final state machine ----------------------------------------------------
+    status: str = Field(
+        default="submitted", index=True
+    )  # submitted | vetting | vetted_pass | vetted_revise | vetted_reject
+    # | trio_reviewing | conditionally_accepted | declined
+    final_decision: str = Field(default="")  # conditionally_accepted | declined
+    final_decision_at: Optional[datetime] = Field(default=None)
+    final_reasoning: str = Field(default="")  # Devin's synthesis of the trio
+    submitted_at: datetime = Field(default_factory=_utcnow)
+
+
+class AgentApplicationReview(SQLModel, table=True):
+    """One trio reviewer's recommendation on an application.
+
+    Each of (Freedom, Garth Corea, Esther Wojcicki) gets a single-use,
+    HMAC-signed link in their email and submits one row here. Unique on
+    (application_id, reviewer_email) so a reviewer can't double-vote.
+    Once 3 rows exist for an application, Devin auto-runs the final
+    synthesis call and writes the result to AgentApplication.final_decision.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id", "reviewer_email", name="uq_application_reviewer"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(index=True)
+    reviewer_email: str = Field(max_length=200, index=True)
+    reviewer_name: str = Field(default="", max_length=200)
+    vote: str = Field(index=True)  # "yes" | "no" | "maybe"
+    comment: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 
