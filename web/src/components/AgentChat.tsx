@@ -580,6 +580,36 @@ function ChatBubble({
           </div>
         ) : (
           <>
+            {/* Reasoning text first (the planner's one-line "what I'll do"),
+                so the user sees the explanation before the actionable
+                Grant/Deny buttons below. */}
+            {segments?.map((seg, idx) => {
+              if (seg.kind === "handoff") {
+                return (
+                  <HandoffCard
+                    key={idx}
+                    target={seg.target}
+                    reason={seg.reason}
+                    description={seg.text}
+                  />
+                );
+              }
+              // While the model is mid-stream emitting an unclosed
+              // <HANDOFF…> tag, hide the trailing fragment so users
+              // don't see raw markup flicker into view.
+              const isTrailing = idx === (segments?.length ?? 0) - 1;
+              const text =
+                isTrailing && isStreamingHandoff
+                  ? seg.text.replace(/<HANDOFF[\s\S]*$/i, "")
+                  : seg.text;
+              return (
+                <div key={idx} className="whitespace-pre-wrap break-words">
+                  {text || (loadingTail && idx === 0 ? "…" : "")}
+                </div>
+              );
+            })}
+            {/* Cowork permission cards render *after* the reasoning so the
+                user reads the plan before the actionable Grant/Deny. */}
             {message.coworkCalls?.map((call) => {
               const r = message.coworkResults?.[call.callId];
               if (r && "denied" in r) {
@@ -626,31 +656,6 @@ function ChatBubble({
                   }
                   onDeny={() => onCoworkResult?.(call.callId, { denied: true })}
                 />
-              );
-            })}
-            {segments?.map((seg, idx) => {
-              if (seg.kind === "handoff") {
-                return (
-                  <HandoffCard
-                    key={idx}
-                    target={seg.target}
-                    reason={seg.reason}
-                    description={seg.text}
-                  />
-                );
-              }
-              // While the model is mid-stream emitting an unclosed
-              // <HANDOFF…> tag, hide the trailing fragment so users
-              // don't see raw markup flicker into view.
-              const isTrailing = idx === (segments?.length ?? 0) - 1;
-              const text =
-                isTrailing && isStreamingHandoff
-                  ? seg.text.replace(/<HANDOFF[\s\S]*$/i, "")
-                  : seg.text;
-              return (
-                <div key={idx} className="whitespace-pre-wrap break-words">
-                  {text || (loadingTail && idx === 0 ? "…" : "")}
-                </div>
               );
             })}
           </>
