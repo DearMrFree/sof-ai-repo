@@ -20,7 +20,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { sanitizeForAnthropic } from "@/lib/anthropicMessages";
 
-export type ProviderName = "anthropic" | "deepseek";
+export type ProviderName = "anthropic" | "deepseek" | "openai" | "perplexity";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -61,26 +61,32 @@ export interface ChatResult {
 // Provider selection
 // ---------------------------------------------------------------------------
 
+const VALID_PROVIDERS: ProviderName[] = ["anthropic", "deepseek", "openai", "perplexity"];
+
 function pickProvider(explicit?: ProviderName): ProviderName {
   if (explicit) return explicit;
   const envChoice = process.env.LLM_PROVIDER?.toLowerCase();
-  if (envChoice === "anthropic" || envChoice === "deepseek") return envChoice;
+  if (VALID_PROVIDERS.includes(envChoice as ProviderName))
+    return envChoice as ProviderName;
 
   const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
   const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
   if (hasAnthropic) return "anthropic";
   if (hasDeepSeek) return "deepseek";
-  // Default matches sof.ai's original provider so behavior is unchanged
-  // when no config is present — the call itself will fail clearly below.
   return "anthropic";
 }
+
+const ENV_KEY_MAP: Record<ProviderName, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  openai: "OPENAI_API_KEY",
+  perplexity: "PERPLEXITY_API_KEY",
+};
 
 export class LLMNotConfiguredError extends Error {
   constructor(provider: ProviderName) {
     super(
-      `The ${provider} LLM provider is not configured. Set ${
-        provider === "anthropic" ? "ANTHROPIC_API_KEY" : "DEEPSEEK_API_KEY"
-      } in the server environment to enable it.`,
+      `The ${provider} LLM provider is not configured. Set ${ENV_KEY_MAP[provider]} in the server environment to enable it.`,
     );
     this.name = "LLMNotConfiguredError";
   }
@@ -359,19 +365,299 @@ function deepseekStream(opts: ChatOptions): ReadableStream<Uint8Array> {
 }
 
 // ---------------------------------------------------------------------------
+// OpenAI — OpenAI-compatible REST (https://api.openai.com/v1)
+// ---------------------------------------------------------------------------
+
+const OPENAI_BASE = "https://api.openai.com/v1";
+
+function openaiModel(opts: ChatOptions): string {
+  return opts.model ?? process.env.OPENAI_MODEL ?? "gpt-4o";
+}
+
+function openaiMessages(opts: ChatOptions) {
+  const merged: ChatMessage[] = [];
+  if (opts.system) merged.push({ role: "system", content: opts.system });
+  merged.push(...opts.messages);
+  return merged;
+}
+
+async function openaiChat(opts: ChatOptions): Promise<ChatResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new LLMNotConfiguredError("openai");
+
+  const model = openaiModel(opts);
+  const body = {
+    model,
+    messages: openaiMessages(opts),
+    max_tokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature,
+    stream: false,
+  };
+
+  const json = await deepseekWithRetry(async () => {
+    const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `OpenAI ${res.status}: ${await res.text().catch(() => "")}`,
+      );
+    }
+    return (await res.json()) as {
+      choices: { message: { content: string } }[];
+    };
+  });
+
+  const msg = json.choices?.[0]?.message;
+  return { content: msg?.content ?? "", provider: "openai", model };
+}
+
+function openaiStream(opts: ChatOptions): ReadableStream<Uint8Array> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new LLMNotConfiguredError("openai");
+
+  const model = openaiModel(opts);
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: openaiMessages(opts),
+            max_tokens: opts.maxTokens ?? 1024,
+            temperature: opts.temperature,
+            stream: true,
+          }),
+        });
+        if (!res.ok || !res.body) {
+          throw new Error(
+            `OpenAI ${res.status}: ${await res.text().catch(() => "")}`,
+          );
+        }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n\n")) >= 0) {
+            const chunk = buf.slice(0, nl);
+            buf = buf.slice(nl + 2);
+            for (const raw of chunk.split("\n")) {
+              const line = raw.trim();
+              if (!line.startsWith("data:")) continue;
+              const payload = line.slice(5).trim();
+              if (payload === "[DONE]") { controller.close(); return; }
+              try {
+                const j = JSON.parse(payload) as {
+                  choices?: { delta?: { content?: string } }[];
+                };
+                const piece = j.choices?.[0]?.delta?.content;
+                if (piece) controller.enqueue(encoder.encode(piece));
+              } catch { /* tolerate malformed chunks */ }
+            }
+          }
+        }
+        const tail = dec.decode();
+        if (tail) controller.enqueue(encoder.encode(tail));
+        controller.close();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        controller.enqueue(encoder.encode(`\n\n[llm error] ${msg}`));
+        controller.close();
+      }
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Perplexity — OpenAI-compatible REST (https://api.perplexity.ai)
+//
+// Perplexity is the research workhorse: every request is backed by live web
+// search, and responses include inline citations. We pass
+// `return_citations: true` so the model footnotes its sources.
+// ---------------------------------------------------------------------------
+
+const PERPLEXITY_BASE = "https://api.perplexity.ai";
+
+function perplexityModel(opts: ChatOptions): string {
+  return opts.model ?? process.env.PERPLEXITY_MODEL ?? "sonar-pro";
+}
+
+function perplexityMessages(opts: ChatOptions) {
+  const merged: ChatMessage[] = [];
+  if (opts.system) merged.push({ role: "system", content: opts.system });
+  merged.push(...opts.messages);
+  return merged;
+}
+
+async function perplexityChat(opts: ChatOptions): Promise<ChatResult> {
+  const apiKey = process.env.PERPLEXITY_API_KEY;
+  if (!apiKey) throw new LLMNotConfiguredError("perplexity");
+
+  const model = perplexityModel(opts);
+  const body = {
+    model,
+    messages: perplexityMessages(opts),
+    max_tokens: opts.maxTokens ?? 1024,
+    temperature: opts.temperature,
+    return_citations: true,
+    stream: false,
+  };
+
+  const json = await deepseekWithRetry(async () => {
+    const res = await fetch(`${PERPLEXITY_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `Perplexity ${res.status}: ${await res.text().catch(() => "")}`,
+      );
+    }
+    return (await res.json()) as {
+      choices: { message: { content: string } }[];
+      citations?: string[];
+    };
+  });
+
+  const msg = json.choices?.[0]?.message;
+  let content = msg?.content ?? "";
+  // Append citations as footnotes when the API returns them.
+  if (json.citations && json.citations.length > 0) {
+    content +=
+      "\n\n---\n**Sources**\n" +
+      json.citations.map((url, i) => `[${i + 1}] ${url}`).join("\n");
+  }
+  return { content, provider: "perplexity", model };
+}
+
+function perplexityStream(opts: ChatOptions): ReadableStream<Uint8Array> {
+  const apiKey = process.env.PERPLEXITY_API_KEY;
+  if (!apiKey) throw new LLMNotConfiguredError("perplexity");
+
+  const model = perplexityModel(opts);
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        const res = await fetch(`${PERPLEXITY_BASE}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: perplexityMessages(opts),
+            max_tokens: opts.maxTokens ?? 1024,
+            temperature: opts.temperature,
+            return_citations: true,
+            stream: true,
+          }),
+        });
+        if (!res.ok || !res.body) {
+          throw new Error(
+            `Perplexity ${res.status}: ${await res.text().catch(() => "")}`,
+          );
+        }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        // Collect citations from the final chunk (Perplexity returns them
+        // on the last SSE event alongside `finish_reason`).
+        let citations: string[] = [];
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n\n")) >= 0) {
+            const chunk = buf.slice(0, nl);
+            buf = buf.slice(nl + 2);
+            for (const raw of chunk.split("\n")) {
+              const line = raw.trim();
+              if (!line.startsWith("data:")) continue;
+              const payload = line.slice(5).trim();
+              if (payload === "[DONE]") {
+                if (citations.length > 0) {
+                  const footer =
+                    "\n\n---\n**Sources**\n" +
+                    citations.map((url, i) => `[${i + 1}] ${url}`).join("\n");
+                  controller.enqueue(encoder.encode(footer));
+                }
+                controller.close();
+                return;
+              }
+              try {
+                const j = JSON.parse(payload) as {
+                  choices?: { delta?: { content?: string } }[];
+                  citations?: string[];
+                };
+                if (j.citations) citations = j.citations;
+                const piece = j.choices?.[0]?.delta?.content;
+                if (piece) controller.enqueue(encoder.encode(piece));
+              } catch { /* tolerate malformed chunks */ }
+            }
+          }
+        }
+        // Stream ended without [DONE] — still append citations if collected.
+        if (citations.length > 0) {
+          const footer =
+            "\n\n---\n**Sources**\n" +
+            citations.map((url, i) => `[${i + 1}] ${url}`).join("\n");
+          controller.enqueue(encoder.encode(footer));
+        }
+        const tail = dec.decode();
+        if (tail) controller.enqueue(encoder.encode(tail));
+        controller.close();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        controller.enqueue(encoder.encode(`\n\n[llm error] ${msg}`));
+        controller.close();
+      }
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Public entrypoints
 // ---------------------------------------------------------------------------
 
+function chatRouter(provider: ProviderName) {
+  switch (provider) {
+    case "anthropic": return { chat: anthropicChat, stream: anthropicStream };
+    case "deepseek":  return { chat: deepseekChat, stream: deepseekStream };
+    case "openai":    return { chat: openaiChat, stream: openaiStream };
+    case "perplexity": return { chat: perplexityChat, stream: perplexityStream };
+  }
+}
+
 export function chat(opts: ChatOptions): Promise<ChatResult> {
   const provider = pickProvider(opts.provider);
-  return provider === "deepseek" ? deepseekChat(opts) : anthropicChat(opts);
+  return chatRouter(provider).chat(opts);
 }
 
 export function chatStream(opts: ChatOptions): ReadableStream<Uint8Array> {
   const provider = pickProvider(opts.provider);
-  return provider === "deepseek"
-    ? deepseekStream(opts)
-    : anthropicStream(opts);
+  return chatRouter(provider).stream(opts);
 }
 
 /**
@@ -461,9 +747,40 @@ function parseJSONLoose(raw: string): unknown | null {
 export function llmProviderStatus() {
   const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
   const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasPerplexity = !!process.env.PERPLEXITY_API_KEY;
   return {
     selected: pickProvider(),
-    configured: { anthropic: hasAnthropic, deepseek: hasDeepSeek },
-    anyConfigured: hasAnthropic || hasDeepSeek,
+    configured: {
+      anthropic: hasAnthropic,
+      deepseek: hasDeepSeek,
+      openai: hasOpenAI,
+      perplexity: hasPerplexity,
+    },
+    anyConfigured: hasAnthropic || hasDeepSeek || hasOpenAI || hasPerplexity,
   };
+}
+
+/**
+ * Map an agent provider tag (from agents.ts) to the LLM provider it should
+ * route through. Providers that don't have their own API integration yet
+ * fall back to Anthropic (Claude proxies the persona).
+ */
+export function agentProviderToLLM(
+  agentProvider: string,
+): ProviderName {
+  switch (agentProvider) {
+    case "anthropic": return "anthropic";
+    case "deepseek":  return "deepseek";
+    case "openai":    return "openai";
+    case "perplexity": return "perplexity";
+    default:          return "anthropic"; // google, meta, xai, mistral, cognition → proxy via Claude
+  }
+}
+
+/**
+ * Check whether a given LLM provider has its API key configured.
+ */
+export function isProviderConfigured(provider: ProviderName): boolean {
+  return !!process.env[ENV_KEY_MAP[provider]];
 }

@@ -27,7 +27,7 @@ const AGENTS_INSIDE: { id: string; name: string; emoji: string; color: string }[
   { id: "devin", name: "Devin", emoji: "🛠️", color: "#8b5cf6" },
   { id: "claude", name: "Claude", emoji: "🧠", color: "#f97316" },
   { id: "gemini", name: "Gemini", emoji: "💎", color: "#0ea5e9" },
-  { id: "gpt", name: "GPT-5", emoji: "✴️", color: "#10b981" },
+  { id: "chatgpt", name: "ChatGPT", emoji: "💬", color: "#10b981" },
   { id: "mistral", name: "Mistral", emoji: "🌀", color: "#6366f1" },
   { id: "llama", name: "Llama", emoji: "🦙", color: "#ec4899" },
   { id: "grok", name: "Grok", emoji: "⚡", color: "#facc15" },

@@ -1,9 +1,13 @@
 import { NextRequest } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getAgent, findAgentWithCapability, agentHasCapability } from "@/lib/agents";
-import { sanitizeForAnthropic } from "@/lib/anthropicMessages";
+import { AGENTS, getAgent, findAgentWithCapability, agentHasCapability } from "@/lib/agents";
+import {
+  chatStream,
+  agentProviderToLLM,
+  isProviderConfigured,
+  type ChatMessage,
+} from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +20,6 @@ interface ChatRequest {
 }
 
 export async function POST(req: NextRequest) {
-  // Gate billable Anthropic calls behind an authenticated session so scripts
-  // can't hammer this endpoint and drain the API-key budget.
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return new Response("Sign in to chat with agents.", {
@@ -26,10 +28,15 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  // At least one LLM provider must be configured.
+  const hasAny =
+    !!process.env.ANTHROPIC_API_KEY ||
+    !!process.env.OPENAI_API_KEY ||
+    !!process.env.PERPLEXITY_API_KEY ||
+    !!process.env.DEEPSEEK_API_KEY;
+  if (!hasAny) {
     return new Response(
-      "Agents are not configured. Set ANTHROPIC_API_KEY in the server environment.",
+      "No LLM providers are configured. Set at least one API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, PERPLEXITY_API_KEY, or DEEPSEEK_API_KEY) in the server environment.",
       { status: 503, headers: { "Content-Type": "text/plain" } },
     );
   }
@@ -45,7 +52,13 @@ export async function POST(req: NextRequest) {
     return new Response(`Unknown agent: ${body.agentId}`, { status: 404 });
   }
 
-  const client = new Anthropic({ apiKey });
+  // Determine which LLM provider to use. Prefer the agent's native provider
+  // when its API key is configured; otherwise fall back to Anthropic (Claude
+  // proxies the persona via the system prompt).
+  const nativeProvider = agentProviderToLLM(agent.provider);
+  const provider = isProviderConfigured(nativeProvider)
+    ? nativeProvider
+    : "anthropic";
 
   // Office-hours referrals: tell the agent who's on duty for which job
   // so it can recommend a hand-off instead of half-attempting work that
@@ -76,19 +89,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const agentNames = AGENTS.map((a) => a.name)
+    .filter((n) => n !== agent.name);
+
   const system = [
     agent.systemPrompt,
-    `\nYou are in the sof.ai School of AI classroom. Other agents on the platform include: ${[
-      "Devin",
-      "Claude",
-      "Gemini",
-      "GPT-5",
-      "Mistral",
-      "Llama",
-      "Grok",
-    ]
-      .filter((n) => n !== agent.name)
-      .join(", ")}. You can reference them by name if useful.`,
+    `\nYou are in the sof.ai School of AI classroom. Other agents on the platform include: ${agentNames.join(", ")}. You can reference them by name if useful.`,
     referrals.length > 0
       ? `\n**Office-hours referrals.**\n- ${referrals.join("\n- ")}`
       : "",
@@ -98,45 +104,51 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  // Normalize the transcript to satisfy Anthropic's Messages API contract:
-  // starts with user, alternating roles, no empty content. See
-  // lib/anthropicMessages.ts for details and the rationale.
-  const anthropicMessages = sanitizeForAnthropic(body.messages ?? []);
-  if (anthropicMessages.length === 0) {
-    return new Response("No user messages provided.", { status: 400 });
+  // Build the message array for the LLM. Filter empty and normalize roles.
+  const llmMessages: ChatMessage[] = (body.messages ?? [])
+    .filter((m) => m.content.trim().length > 0)
+    .map((m) => ({ role: m.role, content: m.content }));
+  if (llmMessages.length === 0 || llmMessages[0].role !== "user") {
+    // Ensure the first message is from the user (strip leading assistant).
+    const firstUser = llmMessages.findIndex((m) => m.role === "user");
+    if (firstUser < 0) {
+      return new Response("No user messages provided.", { status: 400 });
+    }
+    llmMessages.splice(0, firstUser);
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        const streamResp = await client.messages.stream({
-          model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
-          max_tokens: 1024,
-          system,
-          messages: anthropicMessages,
-        });
-        for await (const event of streamResp) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            controller.enqueue(encoder.encode(event.delta.text));
-          }
-        }
-        controller.close();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        controller.enqueue(encoder.encode(`\n\n[error] ${msg}`));
-        controller.close();
-      }
-    },
-  });
+  // Merge consecutive same-role messages (same sanitization as
+  // lib/anthropicMessages.ts but works for all providers).
+  const merged: ChatMessage[] = [];
+  for (const m of llmMessages) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === m.role) {
+      last.content = `${last.content}\n${m.content}`;
+    } else {
+      merged.push({ role: m.role, content: m.content });
+    }
+  }
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-    },
-  });
+  try {
+    const stream = chatStream({
+      provider,
+      system,
+      messages: merged,
+      maxTokens: 1024,
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return new Response(`[error] ${msg}`, {
+      status: 500,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }
 }
