@@ -492,3 +492,26 @@ def test_detail_includes_impact_summary() -> None:
         "article": 1,
     }
     assert len(body["contributions"]) == 4
+
+
+def test_impact_summary_aggregates_beyond_list_cap() -> None:
+    """Regression for Devin Review on PR #20.
+
+    Detail returns at most CONTRIBUTION_LIST_LIMIT_DEFAULT (100)
+    contributions in the rendered list, but the impact aggregate must
+    reflect ALL of them. Insert 105, then assert impact.total == 105.
+    """
+    a = _submit()
+    _force_status(a["id"], "trio_reviewing")
+    for i in range(105):
+        r = client.post(
+            f"/applications/{a['id']}/contributions",
+            json={"kind": "challenge", "summary": f"#{i}", "weight": 1.0},
+        )
+        assert r.status_code == 201
+    r = client.get(f"/applications/{a['id']}")
+    body = r.json()
+    assert body["impact"]["total"] == 105
+    assert body["impact"]["weighted"] == 105.0
+    # Rendered list still capped at 100 for pagination
+    assert len(body["contributions"]) == 100

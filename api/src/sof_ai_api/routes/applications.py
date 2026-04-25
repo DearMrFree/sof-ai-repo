@@ -337,6 +337,36 @@ def _impact_summary(rows: list[AgentContribution]) -> ImpactSummaryOut:
     )
 
 
+def _compute_impact(
+    session: Session, application_id: int
+) -> ImpactSummaryOut:
+    """Aggregate ALL contributions for an application — never LIMIT-capped.
+
+    The detail surface caps the rendered contribution list at
+    ``CONTRIBUTION_LIST_LIMIT_DEFAULT`` for pagination, but the impact
+    summary that drives the conditional → full membership renewal must
+    reflect every logged contribution. We pull just (kind, weight) so
+    the row payload stays small even at the long tail.
+    """
+    rows = session.exec(
+        select(AgentContribution.kind, AgentContribution.weight).where(  # type: ignore[arg-type]
+            AgentContribution.application_id == application_id
+        )
+    ).all()
+    by_kind: dict[str, int] = {}
+    weighted = 0.0
+    total = 0
+    for kind, weight in rows:
+        total += 1
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        weighted += weight or 0.0
+    return ImpactSummaryOut(
+        total=total,
+        weighted=round(weighted, 3),
+        by_kind=by_kind,
+    )
+
+
 def _serialize_review(r: AgentApplicationReview) -> ReviewOut:
     return ReviewOut(
         id=r.id or 0,
@@ -459,7 +489,10 @@ def get_application(
         reviews=[_serialize_review(r) for r in reviews],
         comments=[_serialize_comment(c) for c in comments],
         contributions=[_serialize_contribution(c) for c in contributions],
-        impact=_impact_summary(list(contributions)),
+        # Impact must aggregate over ALL contributions, not the
+        # LIMIT-capped subset above — otherwise applicants with >100
+        # contributions would see their renewal score under-reported.
+        impact=_compute_impact(session, application_id),
     )
 
 
