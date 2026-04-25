@@ -894,24 +894,20 @@ def post_contribution(
     application = session.get(AgentApplication, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="application not found")
-    # Only contributors who have at least made it past Devin's vet count
-    # — pre-vet rows can't accumulate impact (would let a rejected
-    # applicant build a fake track record). The trio sign-off is *not*
-    # required because a conditionally-accepted applicant is the
-    # primary case but a vetted_pass applicant who hasn't yet collected
-    # all three votes can still be credited (e.g. they file a Challenge
-    # while the trio is still voting).
-    if application.status in {
-        "submitted",
-        "vetting",
-        "vetted_revise",
-        "vetted_reject",
-    }:
+    # Allowlist (not blocklist) so future status additions are
+    # safe-by-default — a typo or new state can't accidentally let a
+    # rejected applicant farm a fake track record. Only applicants who
+    # have actually cleared Devin's vet (currently moves them straight
+    # to ``trio_reviewing``) or who already have a conditional
+    # acceptance can accumulate impact. Every other status — pre-vet,
+    # needs_revision, vet-rejected, trio-declined — is a hard 409.
+    if application.status not in {"trio_reviewing", "conditionally_accepted"}:
         raise HTTPException(
             status_code=409,
             detail=(
                 f"application is in status {application.status!r}; "
-                "must be past Devin's vet to log contributions."
+                "must be past Devin's vet (and not declined) to log "
+                "contributions."
             ),
         )
 

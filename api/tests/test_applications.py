@@ -415,6 +415,45 @@ def test_contribution_blocked_before_vet() -> None:
     assert r.status_code == 409
 
 
+def test_contribution_blocked_on_declined() -> None:
+    """Devin Review on PR #20: declined (terminal trio rejection) must
+    NOT accumulate contributions either.
+
+    Same rationale as vetted_revise: a rejected applicant can't farm a
+    track record. We invert to an allowlist so any future status name
+    is safe-by-default.
+    """
+    a = _submit()
+    _force_status(a["id"], "trio_reviewing")
+    # Three trio "no" votes finalize as declined
+    for email, name in [
+        ("freedom@thevrschool.org", "Freedom"),
+        ("gcorea@apa.org", "Garth"),
+        ("ewojcicki@gmail.com", "Esther"),
+    ]:
+        r = client.post(
+            f"/applications/{a['id']}/review",
+            json={
+                "reviewer_email": email,
+                "reviewer_name": name,
+                "vote": "no",
+                "comment": "not aligned",
+            },
+        )
+        assert r.status_code == 200, r.text
+    r = client.post(
+        f"/applications/{a['id']}/finalize",
+        json={"final_decision": "declined", "final_reasoning": "3-no"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "declined"
+    r = client.post(
+        f"/applications/{a['id']}/contributions",
+        json={"kind": "challenge", "summary": "post-rejection"},
+    )
+    assert r.status_code == 409
+
+
 def test_contribution_blocked_on_vetted_revise() -> None:
     """Devin Review on PR #20: vetted_revise must NOT accumulate impact.
 
