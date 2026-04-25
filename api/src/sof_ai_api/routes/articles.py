@@ -460,7 +460,7 @@ def advance_pipeline(
     try:
         nxt = _next_phase(current)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
     # Persist a review round when the *current* phase is one of the agent
     # review phases — i.e. the call is recording the work just completed.
