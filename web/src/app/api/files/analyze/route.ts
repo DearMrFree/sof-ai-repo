@@ -128,16 +128,57 @@ export async function POST(req: NextRequest) {
         { status: 502, headers: { "Content-Type": "text/plain" } },
       );
     }
+    if (!res.body) {
+      return new Response("Blob response had no body.", {
+        status: 502,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
     if (isTextish(body.contentType, body.fileName)) {
-      const buf = await res.arrayBuffer();
-      truncated = buf.byteLength > MAX_INLINE_BYTES;
-      const slice = truncated ? buf.slice(0, MAX_INLINE_BYTES) : buf;
-      fileText = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+      // Stream-read only the first MAX_INLINE_BYTES, then cancel the
+      // remaining stream. ``upload`` accepts arbitrarily large files
+      // by design, but the analyzer must never buffer more than the
+      // budget into memory — otherwise an authenticated caller can
+      // OOM the serverless function with a single multi-GB upload.
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let downloaded = 0;
+      let streamDone = false;
+      while (downloaded < MAX_INLINE_BYTES) {
+        const { value, done } = await reader.read();
+        if (done) {
+          streamDone = true;
+          break;
+        }
+        chunks.push(value);
+        downloaded += value.byteLength;
+      }
+      if (!streamDone) {
+        // Best-effort: tell the upstream we're done so the connection
+        // doesn't sit half-open. Errors here aren't actionable.
+        await reader.cancel().catch(() => undefined);
+      }
+      truncated = downloaded > MAX_INLINE_BYTES || !streamDone;
+      // Concatenate up to the budget. The last chunk may push us
+      // slightly past MAX_INLINE_BYTES; slice down before decode.
+      const merged = new Uint8Array(Math.min(downloaded, MAX_INLINE_BYTES));
+      let offset = 0;
+      for (const chunk of chunks) {
+        if (offset >= merged.byteLength) break;
+        const room = merged.byteLength - offset;
+        const take = chunk.byteLength <= room ? chunk : chunk.subarray(0, room);
+        merged.set(take, offset);
+        offset += take.byteLength;
+      }
+      fileText = new TextDecoder("utf-8", { fatal: false }).decode(merged);
     } else {
       // For PDFs / binary blobs we describe the file at a high level
       // rather than attempting OCR / parsing in this minimal v1. The
       // frontend can still surface the file URL to the user for manual
       // download, and Claude can reason about the metadata.
+      // Cancel the body stream we won't consume so the underlying
+      // connection is released promptly.
+      await res.body.cancel().catch(() => undefined);
       binarySummary = [
         `Binary file uploaded: ${body.fileName}`,
         `MIME: ${body.contentType}`,
