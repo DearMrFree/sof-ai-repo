@@ -33,6 +33,22 @@ function defaultFrom(): string {
   return process.env.EMAIL_FROM ?? "School of AI <onboarding@resend.dev>";
 }
 
+/**
+ * Escape user-controlled values for safe interpolation into HTML email
+ * templates. Without this, an applicant could inject markup into the
+ * reviewer email — e.g. a fake "Cast your vote: YES" button pointing at
+ * a phishing URL — since the trio reads these emails to make a real
+ * trust decision.
+ */
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -109,28 +125,42 @@ export function renderReviewerEmail(ctx: ReviewerEmailContext): {
   html: string;
   text: string;
 } {
+  const safeApplicantName = escapeHtml(ctx.applicantName);
+  const safeAgentName = escapeHtml(ctx.agentName);
+  const safeApplicantKind = escapeHtml(ctx.applicantKind.replace(/_/g, " "));
+  const safeReviewerFirst = escapeHtml(ctx.reviewerName.split(" ")[0] || "there");
+  const safeRecommendation = escapeHtml(
+    ctx.vetRecommendation || "(no recommendation provided)",
+  );
+  // Escape first, then convert newlines to <br/> so the line break
+  // markup survives the entity escape pass.
+  const safeMission = escapeHtml(ctx.missionStatement).replace(/\n+/g, "<br/>");
+  const safeApa = escapeHtml(ctx.apaStatement).replace(/\n+/g, "<br/>");
+  // The review link is server-minted (b64url of JSON + HMAC sig joined
+  // by '.') and goes inside an href; still encode it as a URI to be
+  // belt-and-suspenders safe.
+  const safeLink = encodeURI(ctx.reviewLink);
+
   const subject = `[sof.ai] Vote needed: ${ctx.agentName || ctx.applicantName} — application #${ctx.applicationId}`;
-  const safeMission = ctx.missionStatement.replace(/\n+/g, "<br/>");
-  const safeApa = ctx.apaStatement.replace(/\n+/g, "<br/>");
   const html = `
     <div style="font-family: -apple-system, system-ui, sans-serif; color: #0f172a; max-width: 640px;">
       <h1 style="font-size: 20px; margin: 0 0 8px 0;">A new applicant needs your vote.</h1>
       <p style="margin: 0 0 16px 0; color: #334155;">
-        Hi ${ctx.reviewerName.split(" ")[0] || "there"} — Devin has finished its first-pass vetting on a new sof.ai applicant. Two of three trio votes plus Devin's synthesis decide whether they get conditional acceptance.
+        Hi ${safeReviewerFirst} — Devin has finished its first-pass vetting on a new sof.ai applicant. Two of three trio votes plus Devin's synthesis decide whether they get conditional acceptance.
       </p>
       <h2 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin: 16px 0 4px;">Applicant</h2>
       <p style="margin: 0 0 16px 0;">
-        <strong>${ctx.applicantName}</strong>${ctx.agentName ? ` &middot; ${ctx.agentName}` : ""}<br/>
-        <span style="color: #64748b;">${ctx.applicantKind.replace(/_/g, " ")}</span>
+        <strong>${safeApplicantName}</strong>${safeAgentName ? ` &middot; ${safeAgentName}` : ""}<br/>
+        <span style="color: #64748b;">${safeApplicantKind}</span>
       </p>
       <h2 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin: 16px 0 4px;">Mission alignment</h2>
       <p style="margin: 0 0 16px 0; color: #334155;">${safeMission}</p>
       <h2 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin: 16px 0 4px;">APA alignment</h2>
       <p style="margin: 0 0 16px 0; color: #334155;">${safeApa}</p>
       <h2 style="font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin: 16px 0 4px;">Devin's recommendation</h2>
-      <p style="margin: 0 0 24px 0; color: #334155;">${ctx.vetRecommendation || "(no recommendation provided)"}</p>
+      <p style="margin: 0 0 24px 0; color: #334155;">${safeRecommendation}</p>
       <p style="margin: 0 0 24px 0;">
-        <a href="${ctx.reviewLink}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 10px 18px; border-radius: 8px; font-weight: 600;">Cast your vote</a>
+        <a href="${safeLink}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 10px 18px; border-radius: 8px; font-weight: 600;">Cast your vote</a>
       </p>
       <p style="margin: 0; color: #94a3b8; font-size: 12px;">
         This link is signed with HMAC-SHA256 and expires in 30 days. You can change your vote until all three reviewers have submitted.
