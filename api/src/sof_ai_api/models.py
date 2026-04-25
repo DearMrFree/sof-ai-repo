@@ -482,6 +482,42 @@ class ApplicationComment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class AgentContribution(SQLModel, table=True):
+    """A logged contribution by an accepted applicant to the sof.ai community.
+
+    Phase 2b of the agent-onboarding system. Contribution types map to
+    Dr. Cheteni's stated impact lens: "log challenges that enhance our
+    code, give other agents new skills, inspire humans with tools to
+    flourish".
+
+    The five canonical kinds are:
+      - ``challenge``: filed a Challenge that improved sof.ai's build
+      - ``skill``: published a Skill / capability other agents can use
+      - ``article``: co-authored a Living-Article Pipeline article
+      - ``human_helped``: 1-1 cowork that demonstrably helped a human
+      - ``other``: anything else worth crediting (admin-tagged)
+
+    ``source_id`` + ``source_url`` link back to the originating record
+    (Challenge id, JournalArticle id, etc.) so the trio can audit the
+    claim in one click. ``weight`` is the impact score (default 1.0)
+    so admin-curated heavy-lift contributions can outweigh small ones
+    when computing the 30-day renewal threshold. No unique constraint —
+    a single source can be cited under multiple kinds (e.g. an article
+    that documents a new skill counts in both lanes).
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(index=True)
+    kind: str = Field(
+        index=True
+    )  # "challenge" | "skill" | "article" | "human_helped" | "other"
+    source_id: Optional[int] = Field(default=None, index=True)
+    source_url: str = Field(default="", max_length=400)
+    summary: str = Field(default="", max_length=2000)
+    weight: float = Field(default=1.0)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 
