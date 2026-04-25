@@ -194,26 +194,80 @@ interface ReviewSplit {
 
 export function splitReview(text: string): ReviewSplit {
   const cleaned = text.trim();
-  const summaryMatch = cleaned.match(/SUMMARY:\s*([\s\S]*?)(?:\n\s*BODY:|$)/i);
-  const bodyMatch = cleaned.match(/BODY:\s*([\s\S]*)$/i);
 
-  if (summaryMatch && bodyMatch) {
+  // Accept several SUMMARY/BODY shapes the model might emit:
+  //   "SUMMARY: foo ... BODY: bar"          (literal label form)
+  //   "**SUMMARY**\n foo ... **BODY**\n bar" (bold form)
+  //   "# SUMMARY\n foo ... # BODY\n bar"    (markdown heading form)
+  //
+  // We strip both bold and heading prefixes first so a single label regex
+  // handles all three. The split fails closed: if a SUMMARY label exists
+  // but the captured group is empty (model emitted just "# SUMMARY\n\n…"),
+  // we fall through to the firstPara fallback so the displayed summary
+  // is always something the reader can scan.
+  const norm = cleaned
+    .replace(/^[ \t]*#{1,6}[ \t]*(SUMMARY|BODY)\b/gim, "$1:")
+    .replace(/\*\*\s*(SUMMARY|BODY)\s*\*\*/gi, "$1:");
+
+  const summaryMatch = norm.match(
+    /\bSUMMARY:\s*([\s\S]*?)(?:\n\s*BODY:|$)/i,
+  );
+  const bodyMatch = norm.match(/\bBODY:\s*([\s\S]*)$/i);
+
+  const trimmedSummary = summaryMatch ? summaryMatch[1].trim() : "";
+  const trimmedBody = bodyMatch ? bodyMatch[1].trim() : "";
+
+  if (trimmedSummary && trimmedBody) {
     return {
-      summary: summaryMatch[1].trim().slice(0, 500),
-      body: bodyMatch[1].trim(),
+      summary: trimmedSummary.slice(0, 500),
+      body: trimmedBody,
     };
   }
 
-  const firstPara = cleaned.split(/\n\s*\n/)[0] ?? cleaned;
+  // Fallback: first non-empty paragraph as summary, full text as body.
+  // Skips heading-only lines so "# SUMMARY" is never the surfaced summary.
+  const paras = cleaned
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((p) => !/^#{1,6}\s+\w+\s*$/.test(p))
+    .filter((p) => !/^\*\*\s*\w+\s*\*\*$/.test(p));
+  const firstPara = paras[0] ?? cleaned;
   return {
     summary: firstPara.slice(0, 500),
-    body: cleaned,
+    body: trimmedBody || cleaned,
   };
 }
 
 // ---------------------------------------------------------------------------
 // Anthropic + Gemini call helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Returns true if the error is a transient Anthropic failure worth a retry
+ * (rate-limit, overloaded, gateway timeout, generic 5xx). Hard 4xx errors
+ * (auth, model not found, invalid request) are NOT retried — they will
+ * keep failing the same way.
+ */
+function isRetryableAnthropicError(err: unknown): boolean {
+  if (!err) return false;
+  if (typeof err === "object" && err !== null) {
+    const status = (err as { status?: number }).status;
+    if (typeof status === "number") {
+      // 408 timeout, 429 rate limit, 529 overloaded, any 5xx.
+      if (status === 408 || status === 429 || status >= 500) return true;
+      return false;
+    }
+  }
+  // Network errors don't carry .status — retry by default.
+  const msg = String(err).toLowerCase();
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("network") ||
+    msg.includes("timeout") ||
+    msg.includes("econn")
+  );
+}
 
 async function runAnthropicReview(
   system: string,
@@ -226,19 +280,37 @@ async function runAnthropicReview(
     );
   }
   const client = new Anthropic({ apiKey });
-  const resp = await client.messages.create({
-    model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
-    max_tokens: 2048,
-    system,
-    messages: [{ role: "user", content: userMessage }],
-  });
-  const text = resp.content
-    .filter((p): p is Anthropic.TextBlock => p.type === "text")
-    .map((p) => p.text)
-    .join("\n\n")
-    .trim();
-  if (!text) throw new Error("Empty response from Anthropic.");
-  return text;
+  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
+
+  // Up to 3 attempts with exponential backoff (2s, 6s) on transient errors.
+  // Total worst-case added latency: ~8s before giving up. The pipeline as
+  // a whole has a 600s ceiling so even three retries can't blow it up.
+  const delays = [2000, 6000];
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < delays.length + 1; attempt++) {
+    try {
+      const resp = await client.messages.create({
+        model,
+        max_tokens: 2048,
+        system,
+        messages: [{ role: "user", content: userMessage }],
+      });
+      const text = resp.content
+        .filter((p): p is Anthropic.TextBlock => p.type === "text")
+        .map((p) => p.text)
+        .join("\n\n")
+        .trim();
+      if (!text) throw new Error("Empty response from Anthropic.");
+      return text;
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= delays.length || !isRetryableAnthropicError(err)) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
+  throw lastErr;
 }
 
 async function runGeminiReview(
