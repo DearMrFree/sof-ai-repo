@@ -532,6 +532,87 @@ class AgentContribution(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class StudentEnrollment(SQLModel, table=True):
+    """A student's enrollment at School of AI — first-class long-form record.
+
+    Distinct from the program-level ``Enrollment`` (user_id ↔ program_slug),
+    which tracks course participation. ``StudentEnrollment`` tracks the
+    durable mentorship relationship between a learner and their roster
+    of professors (human + AI).
+
+
+    Where ``AgentApplication`` is the *application* surface (gate-kept,
+    finite, terminates at conditional/full membership), ``Enrollment``
+    is the *learning relationship* — durable, mutable, with a roster of
+    professors guiding curriculum and progress notes accumulating over
+    months and years.
+
+    A new ``Enrollment`` is created when an application's `status` flips
+    to ``conditionally_accepted`` (or when the trio explicitly enrolls
+    someone outside the application flow). The ``application_id`` link
+    is kept so we can trace the learning relationship back to the
+    original onboarding record, but Enrollments outlive their applications
+    and can have professors added/removed over time.
+
+    ``status`` lifecycle: ``active`` (currently learning), ``paused``
+    (on hiatus), ``graduated`` (curriculum complete, full member of the
+    community), ``withdrawn`` (left voluntarily — distinct from the
+    application's ``expired``/``declined`` states).
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: Optional[int] = Field(default=None, index=True)
+    student_name: str = Field(max_length=200)
+    student_email: str = Field(max_length=200, index=True)
+    agent_name: str = Field(default="", max_length=200)
+    agent_url: str = Field(default="", max_length=400)
+    track: str = Field(default="", max_length=200)  # e.g. "human_with_ai"
+    status: str = Field(
+        default="active", index=True
+    )  # active | paused | graduated | withdrawn
+    notes: str = Field(default="")  # admin-only progress notes (markdown)
+    started_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class StudentProfessor(SQLModel, table=True):
+    """A professor (human or AI) attached to a student's StudentEnrollment.
+
+    Many-to-many: a single human can mentor multiple students, and a
+    single student has multiple professors (typically one human lead +
+    one AI lead, plus optional co-leads/guests). Identity is by
+    ``professor_email`` so humans (Dr. Cheteni, Garth, Esther) and AI
+    professors (Devin, Claude — addressed as ``devin@sof.ai`` etc.)
+    use a single namespace.
+
+    ``role`` lifecycle: ``lead`` (primary mentor; min 1 required for an
+    active enrollment), ``co_lead`` (shares responsibility), ``guest``
+    (occasional consult, e.g. Gemini for visual reviews).
+
+    The ``(student_enrollment_id, professor_email, role)`` UniqueConstraint
+    backs up the SELECT-then-INSERT idempotency in ``add_professor`` /
+    ``create_enrollment``, which alone has a TOCTOU race under concurrent
+    requests.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "student_enrollment_id",
+            "professor_email",
+            "role",
+            name="uq_student_professor_role",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    student_enrollment_id: int = Field(index=True)
+    professor_email: str = Field(max_length=200, index=True)
+    professor_name: str = Field(default="", max_length=200)
+    professor_kind: str = Field(default="human")  # "human" | "ai"
+    role: str = Field(default="lead", index=True)  # "lead" | "co_lead" | "guest"
+    added_at: datetime = Field(default_factory=_utcnow)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 

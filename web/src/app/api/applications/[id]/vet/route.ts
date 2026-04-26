@@ -101,24 +101,57 @@ export async function POST(
       }
     : null;
 
-  let vet;
+  // Optional override: when Dr. Cheteni has personally vouched for the
+  // applicant (e.g. someone he's met IRL or already partnered with on
+  // another project), the Anthropic vet step is unnecessary friction —
+  // his vouch *is* the vet. Body shape:
+  //   { override: true, override_reason: "..." }
+  // Anything else falls through to the normal Anthropic call.
+  let body: { override?: boolean; override_reason?: string } = {};
   try {
-    vet = await runDevinVet({
-      applicantKind: application.applicant_kind,
-      applicantName: application.applicant_name,
-      agentName: application.agent_name,
-      orgName: application.org_name,
-      agentUrl: application.agent_url,
-      missionStatement: application.mission_statement,
-      apaStatement: application.apa_statement,
-      publicReviewUrl: application.public_review_url,
-      publicSignal,
-    });
-  } catch (err) {
-    return NextResponse.json(
-      { error: "Vet failed: " + (err instanceof Error ? err.message : String(err)) },
-      { status: 502 },
-    );
+    body = await req.json();
+  } catch {
+    // Empty body is fine — defaults to non-override path.
+  }
+
+  let vet: {
+    vet_status: "passed" | "needs_revision" | "rejected";
+    reasoning: string;
+    recommendation: string;
+  };
+  if (body.override === true) {
+    const reason =
+      (body.override_reason ?? "").trim() ||
+      "Dr. Freedom Cheteni has personally vouched for this applicant; " +
+        "Devin's first-pass vet is bypassed and the application is " +
+        "forwarded directly to the trio for sign-off.";
+    vet = {
+      vet_status: "passed",
+      reasoning: reason,
+      recommendation:
+        `Founder vouch from Dr. Freedom Cheteni: ${reason} ` +
+        "Recommend the trio review the applicant's mission + APA " +
+        "statements directly and vote based on that evidence.",
+    };
+  } else {
+    try {
+      vet = await runDevinVet({
+        applicantKind: application.applicant_kind,
+        applicantName: application.applicant_name,
+        agentName: application.agent_name,
+        orgName: application.org_name,
+        agentUrl: application.agent_url,
+        missionStatement: application.mission_statement,
+        apaStatement: application.apa_statement,
+        publicReviewUrl: application.public_review_url,
+        publicSignal,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Vet failed: " + (err instanceof Error ? err.message : String(err)) },
+        { status: 502 },
+      );
+    }
   }
 
   const persistRes = await fetch(`${getApiBaseUrl()}/applications/${id}/vet`, {
