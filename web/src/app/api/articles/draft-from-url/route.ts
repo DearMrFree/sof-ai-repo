@@ -26,6 +26,12 @@ import {
   fetchSourceUrl,
   SourceUrlError,
 } from "@/lib/articles/sourceUrl";
+import {
+  PUBLISH_DRAFT_TOOL,
+  coerceDraftFromInput,
+  tryParseDraftJson,
+  type DraftResult,
+} from "@/lib/articles/draftSchema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,14 +43,6 @@ interface DraftPayload {
   journal_slug?: unknown;
   title_hint?: unknown;
   intent?: unknown;
-}
-
-interface DraftResult {
-  title: string;
-  abstract: string;
-  body: string;
-  source_url: string;
-  source_title: string;
 }
 
 const JOURNAL_LENS: Record<string, { audience: string; voice: string }> = {
@@ -98,17 +96,17 @@ function buildSystemPrompt(slug: string, sourceTitle: string): string {
     "",
     "The source page's title is: " + (sourceTitle || "(unknown)") + ".",
     "",
-    "Output STRICT JSON with exactly these keys:",
-    '  - "title": string, max 200 characters, sentence case, no marketing',
-    "    fluff. The title must commit to a thesis.",
-    '  - "abstract": string, 80-180 words, plain prose, no bullet points.',
-    '  - "body": string, 1500-2500 words of GitHub-flavored Markdown,',
-    "    using ## section headings, occasional bullet lists, and inline",
-    "    links where useful. The body must include at least one concrete",
-    "    example, at least one falsifiable claim, and at least one piece",
-    "    of practical advice the reader can apply this week.",
+    "Call the `publish_draft` tool with:",
+    "  - title: max 200 characters, sentence case, no marketing fluff. The",
+    "    title must commit to a thesis.",
+    "  - abstract: 80-180 words, plain prose, no bullet points.",
+    "  - body: 1500-2500 words of GitHub-flavored Markdown, using ##",
+    "    section headings, occasional bullet lists, and inline links where",
+    "    useful. The body must include at least one concrete example, at",
+    "    least one falsifiable claim, and at least one piece of practical",
+    "    advice the reader can apply this week.",
     "",
-    "Return ONLY the JSON object. No prose before or after. No code fences.",
+    "You MUST call the tool. Do not reply with prose.",
   ].join("\n");
 }
 
@@ -137,39 +135,8 @@ function buildUserMessage(
     "END SOURCE TEXT",
     "",
     "Write the original article that is better than this source, in the",
-    "journal's voice, returning STRICT JSON as specified.",
+    "journal's voice, by calling the publish_draft tool.",
   ].join("\n");
-}
-
-function tryParseDraftJson(raw: string): DraftResult | null {
-  // Tolerate a fenced ```json block even though we asked for raw JSON.
-  let s = raw.trim();
-  if (s.startsWith("```")) {
-    s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  }
-  // Extract the largest JSON object substring as a defensive fallback —
-  // some Claude replies leak a sentence after the JSON.
-  const first = s.indexOf("{");
-  const last = s.lastIndexOf("}");
-  if (first < 0 || last <= first) return null;
-  const slice = s.slice(first, last + 1);
-  try {
-    const parsed = JSON.parse(slice) as Record<string, unknown>;
-    const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
-    const abstract =
-      typeof parsed.abstract === "string" ? parsed.abstract.trim() : "";
-    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
-    if (!title || !body) return null;
-    return {
-      title: title.slice(0, 300),
-      abstract: abstract.slice(0, 4000),
-      body: body.slice(0, 200_000),
-      source_url: "",
-      source_title: "",
-    };
-  } catch {
-    return null;
-  }
 }
 
 export async function POST(req: Request) {
@@ -242,12 +209,15 @@ export async function POST(req: Request) {
   const client = new Anthropic({ apiKey });
   const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
 
-  let raw = "";
+  let parsed: DraftResult | null = null;
+  let textFallback = "";
   try {
     const resp = await client.messages.create({
       model,
       max_tokens: 4096,
       system: buildSystemPrompt(journalSlug, fetched.title),
+      tools: [PUBLISH_DRAFT_TOOL],
+      tool_choice: { type: "tool", name: PUBLISH_DRAFT_TOOL.name },
       messages: [
         {
           role: "user",
@@ -262,7 +232,16 @@ export async function POST(req: Request) {
       ],
     });
     for (const block of resp.content) {
-      if (block.type === "text") raw += block.text;
+      if (block.type === "tool_use" && block.name === PUBLISH_DRAFT_TOOL.name) {
+        parsed = coerceDraftFromInput(block.input);
+        if (parsed) break;
+      } else if (block.type === "text") {
+        textFallback += block.text;
+      }
+    }
+    // Defensive: if Claude declined tool-use and emitted prose JSON, parse it.
+    if (!parsed && textFallback) {
+      parsed = tryParseDraftJson(textFallback);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error.";
@@ -272,7 +251,6 @@ export async function POST(req: Request) {
     );
   }
 
-  const parsed = tryParseDraftJson(raw);
   if (!parsed) {
     return NextResponse.json(
       {
