@@ -49,7 +49,11 @@ export async function notifyBlajon(
   const phoneHref = lead.phone ? `tel:${lead.phone.replace(/[^+\d]/g, "")}` : "";
   const emailHref = lead.email ? `mailto:${escapeHtml(lead.email)}` : "";
 
-  const subject = `[AI1 lead] ${safe.service} \u2014 ${safe.name}`;
+  // Email subject is plain text, NOT HTML — use raw values so an
+  // apostrophe in the customer's name doesn't render as `O&#x27;Brien`
+  // in Blajon's inbox. The HTML-escaped `safe.*` aliases stay
+  // reserved for the html body below.
+  const subject = `[AI1 lead] ${humanService(lead.service)} \u2014 ${lead.name}`;
   const text = [
     `New lead from LuxAI1 on ai1.llc`,
     ``,

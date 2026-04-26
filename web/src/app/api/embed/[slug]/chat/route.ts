@@ -136,7 +136,16 @@ export async function POST(
   let leadError: string | undefined;
   let finalText = "";
 
-  for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
+  // The whole tool-use loop runs inside a try/catch so an Anthropic
+  // outage (rate limit, overload, transient 5xx, network blip) returns
+  // a structured 502 with the same `Access-Control-Allow-Origin: *`
+  // headers as the success path. Without this, the exception
+  // propagates out of the handler and Next.js emits a bare 500 with
+  // NO CORS headers — the cross-origin widget on ai1.llc then sees an
+  // opaque CORS failure and shows its generic "I'm offline for a
+  // moment" fallback even though the network reached us.
+  try {
+    for (let hop = 0; hop < MAX_TOOL_HOPS; hop++) {
     const resp = await client.messages.create({
       model,
       max_tokens: 1024,
@@ -221,6 +230,20 @@ export async function POST(
       }
     }
     sdkMessages.push({ role: "user", content: toolResults });
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line no-console
+    console.error("[embed/luxai1/chat] anthropic_error", { detail });
+    return jsonResponse(
+      {
+        error: "model_error",
+        reply:
+          "Sorry — I'm having trouble thinking right now. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.",
+        lead_submitted: false,
+      },
+      { status: 502 },
+    );
   }
 
   if (!finalText) {
