@@ -253,6 +253,39 @@ def test_pending_excludes_active_under_cooldown() -> None:
     assert cid_cold in ids
 
 
+def test_pending_total_reflects_full_backlog_not_page() -> None:
+    """Regression: total must count every eligible row, not just the page.
+
+    The cron consumer reports `total` as the backlog size in its run
+    summary; capping it at `limit` would silently mask a runaway queue.
+    Insert > limit eligible rows and verify total > limit while items
+    is bounded by limit.
+    """
+    limit = 3
+    eligible_ids: list[int] = []
+    for i in range(limit + 2):
+        eligible_ids.append(
+            _make_conversation(
+                f"thr_pending_total_{i}",
+                status="converted",
+                last_turn_offset=timedelta(minutes=10 + i),
+            )
+        )
+
+    r = client.get(
+        f"/embed/luxai1/insights/pending?limit={limit}",
+        headers=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert len(payload["items"]) == limit
+    assert payload["total"] >= len(eligible_ids), (
+        f"total={payload['total']} must reflect full backlog "
+        f"(>= {len(eligible_ids)} just-inserted eligible rows), not the page size"
+    )
+    assert payload["total"] > limit
+
+
 def test_pending_excludes_zero_turn_rows() -> None:
     cid_empty = _make_conversation(
         "thr_pending_empty",

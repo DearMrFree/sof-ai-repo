@@ -641,7 +641,11 @@ def list_pending_insights(
         .order_by(EmbedConversation.last_turn_at.asc())  # type: ignore[union-attr]
     ).all()
 
-    pending: list[EmbedConversation] = []
+    # Walk every eligible row first so ``total`` reflects the true
+    # backlog the cron is looking at, not just the page we return.
+    # Operators read ``total`` from cron logs to spot backlog growth;
+    # capping it at ``limit`` would silently mask a runaway queue.
+    eligible: list[EmbedConversation] = []
     for r in rows:
         if r.id in classified_ids:
             continue
@@ -659,11 +663,10 @@ def list_pending_insights(
         # Empty rows (zero turns recorded) carry no signal.
         if r.turn_count <= 0:
             continue
-        pending.append(r)
-        if len(pending) >= limit:
-            break
+        eligible.append(r)
 
+    page = eligible[:limit]
     return PendingListOut(
-        items=[PendingConversationOut(conversation=_serialize_full(r)) for r in pending],
-        total=len(pending),
+        items=[PendingConversationOut(conversation=_serialize_full(r)) for r in page],
+        total=len(eligible),
     )
