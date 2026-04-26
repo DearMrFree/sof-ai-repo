@@ -11,10 +11,13 @@ Coverage:
     submitted → trio_reviewing → conditionally_accepted
 """
 
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 
-from sof_ai_api.db import init_db
+from sof_ai_api.db import get_session, init_db
 from sof_ai_api.main import app
+from sof_ai_api.models import AgentApplication, _utcnow
 
 init_db()
 client = TestClient(app)
@@ -616,17 +619,12 @@ def _cond_accept(application_id: int, *, age_days: int = 35) -> None:
     assert r.status_code == 200, r.text
     # Backdate final_decision_at so the cron sees the 30-day window
     # has elapsed.
-    from datetime import timedelta
-
-    from sof_ai_api.db import get_session
-    from sof_ai_api.models import AgentApplication, _utcnow
-
     sess = next(get_session())
     try:
-        app = sess.get(AgentApplication, application_id)
-        assert app is not None
-        app.final_decision_at = _utcnow() - timedelta(days=age_days)
-        sess.add(app)
+        row = sess.get(AgentApplication, application_id)
+        assert row is not None
+        row.final_decision_at = _utcnow() - timedelta(days=age_days)
+        sess.add(row)
         sess.commit()
     finally:
         sess.close()
