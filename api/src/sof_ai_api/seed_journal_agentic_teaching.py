@@ -19,6 +19,8 @@ rewritten through a teaching-expert lens.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlmodel import Session, select
 
 from .ledger import apply_earn_rule
@@ -383,6 +385,13 @@ def _ensure_article(session: Session) -> tuple[JournalArticle, bool]:
         coauthors="agent:devin",
         status="published",
         source_url=SOURCE_URL,
+        # Match the invariant every other publish path enforces (see
+        # routes/articles.py and seed_journal_ai.py): a ``published``
+        # article ALWAYS has a non-null ``published_at`` so OJS
+        # federation and any future date-based filtering see a
+        # consistent timestamp. Without this the article would round-trip
+        # as ``{"status": "published", "published_at": null}``.
+        published_at=datetime.now(UTC),
     )
     session.add(article)
     session.flush()

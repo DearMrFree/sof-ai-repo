@@ -378,10 +378,27 @@ function decodeEntities(s: string): string {
   return s
     .replace(/&[a-z#0-9]+;/gi, (m) => {
       if (ENTITIES[m]) return ENTITIES[m];
+      // Numeric and hex entities can be out-of-range or otherwise invalid
+      // (e.g. ``&#99999999999;``). ``String.fromCodePoint`` throws
+      // ``RangeError`` for any code point above ``0x10FFFF`` — without these
+      // guards a single malformed entity anywhere in the page aborts the
+      // entire ``extractMainText`` pass.
       const num = m.match(/^&#(\d+);$/);
-      if (num) return String.fromCodePoint(Number(num[1]));
+      if (num) {
+        try {
+          return String.fromCodePoint(Number(num[1]));
+        } catch {
+          return m;
+        }
+      }
       const hex = m.match(/^&#x([0-9a-f]+);$/i);
-      if (hex) return String.fromCodePoint(parseInt(hex[1], 16));
+      if (hex) {
+        try {
+          return String.fromCodePoint(parseInt(hex[1], 16));
+        } catch {
+          return m;
+        }
+      }
       return m;
     });
 }

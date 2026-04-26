@@ -75,6 +75,13 @@ def test_agentic_teaching_founding_article_persists_source_url() -> None:
     # The article body must be original — not a copy of LinearB. Spot-check
     # a phrase that only appears in our authored text.
     assert "Pull requests as pedagogy" in a["title"] or "pedagogy" in a["title"]
+    # A ``status="published"`` row MUST have a non-null published_at — every
+    # other publish path enforces this invariant (see seed_journal_ai.py and
+    # routes/articles.py).
+    assert a["status"] == "published"
+    assert a.get("published_at"), (
+        "founding article must have a non-null published_at"
+    )
 
 
 def test_submit_article_accepts_source_url_cross_journal() -> None:
