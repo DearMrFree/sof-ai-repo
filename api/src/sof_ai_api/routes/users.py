@@ -155,8 +155,12 @@ def _normalize_email(email: str) -> str:
 
 def _normalize_handle(handle: str) -> str:
     h = (handle or "").strip().lstrip("@").lower()
-    # Allow [a-z0-9._-] only.
-    safe = "".join(c for c in h if c.isalnum() or c in "._-")
+    # Allow ASCII [a-z0-9._-] only. Note: ``c.isalnum()`` on Python 3 also
+    # accepts non-ASCII alphanumerics (é, ñ, 中, Ω, Arabic digits, …),
+    # which would let handles like ``café`` or homograph attacks (Cyrillic
+    # ``а`` vs Latin ``a``) into URLs at /u/{handle}. Gate on isascii()
+    # too so the handle space stays predictable + URL-safe.
+    safe = "".join(c for c in h if (c.isascii() and c.isalnum()) or c in "._-")
     if not safe or len(safe) > 64:
         raise HTTPException(status_code=400, detail="invalid handle")
     return safe

@@ -192,6 +192,28 @@ def test_admin_recent_requires_internal_auth() -> None:
     assert res.status_code in (401, 403)
 
 
+def test_handle_normalization_strips_non_ascii() -> None:
+    """Regression for Devin Review #38 — Python's ``str.isalnum`` accepts
+    Unicode alphanumerics, so ``café`` would silently round-trip if we
+    didn't ASCII-gate. Verify it's stripped down to ``caf``."""
+    res = client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(email="cafe@example.com", handle="café"),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["handle"] == "caf"
+
+    # And a fully non-ASCII handle should be rejected as invalid (empty
+    # after stripping).
+    res2 = client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(email="cyr@example.com", handle="имя"),
+    )
+    assert res2.status_code == 400
+
+
 def test_goals_strengths_are_capped_and_round_tripped() -> None:
 
 
