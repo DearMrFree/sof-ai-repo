@@ -46,8 +46,31 @@ export async function GET(
       cache: "no-store",
     },
   );
-  return new NextResponse(await res.text(), {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  if (!res.ok) {
+    return new NextResponse(await res.text(), {
+      status: res.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  // Cross-slug guard: a caller authorized for slug A must not be able to
+  // read conversations belonging to slug B by guessing the numeric id.
+  // ``canViewAgent(slug, ...)`` only proves the caller can view *this*
+  // slug's data — the FastAPI lookup is by id alone, so we re-check the
+  // returned row matches the URL's slug before handing it back.
+  let payload: { agent_slug?: string };
+  try {
+    payload = await res.json();
+  } catch {
+    return NextResponse.json(
+      { error: "invalid_upstream_response" },
+      { status: 502 },
+    );
+  }
+  if (payload.agent_slug !== slug) {
+    return NextResponse.json(
+      { error: "conversation_not_found" },
+      { status: 404 },
+    );
+  }
+  return NextResponse.json(payload);
 }

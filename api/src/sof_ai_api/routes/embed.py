@@ -278,22 +278,27 @@ def list_conversations(
     status: Optional[str] = Query(default=None),
     session: Session = Depends(get_session),
 ) -> ConversationListOut:
-    base_filter = EmbedConversation.agent_slug == slug
-
+    # Build the page query with status pushed into SQL so LIMIT/OFFSET
+    # operate on the filtered set. Filtering in Python after .limit()
+    # silently truncates pages: a caller asking for `?status=active&
+    # limit=50` would get fewer than 50 even when more matching rows
+    # exist past the page boundary.
+    page_query = select(EmbedConversation).where(
+        EmbedConversation.agent_slug == slug
+    )
+    if status:
+        page_query = page_query.where(EmbedConversation.status == status)
     rows = session.exec(
-        select(EmbedConversation)
-        .where(base_filter)
-        .order_by(EmbedConversation.last_turn_at.desc())  # type: ignore[union-attr]
+        page_query.order_by(EmbedConversation.last_turn_at.desc())  # type: ignore[union-attr]
         .offset(offset)
         .limit(limit)
     ).all()
-    if status:
-        rows = [r for r in rows if r.status == status]
 
-    # Aggregate counts run on the unfiltered query so the list page can
-    # surface "23 conversations · 2 leads" regardless of pagination.
+    # Aggregate counts run on the unfiltered slug query so the list page
+    # can surface "23 conversations · 2 leads" regardless of pagination
+    # or which status the caller is currently scoping to.
     all_rows = session.exec(
-        select(EmbedConversation).where(base_filter)
+        select(EmbedConversation).where(EmbedConversation.agent_slug == slug)
     ).all()
     total = len(all_rows)
     converted_total = sum(1 for r in all_rows if r.lead_submitted)
