@@ -16,7 +16,7 @@ import os
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from sof_ai_api.db import engine, init_db
 from sof_ai_api.main import app
