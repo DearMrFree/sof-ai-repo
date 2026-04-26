@@ -235,12 +235,19 @@ export async function POST(
     const detail = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console
     console.error("[embed/luxai1/chat] anthropic_error", { detail });
+    // Preserve `leadSubmitted` from any earlier successful tool hop —
+    // the email to Blajon already went out, so the widget must show
+    // its "sent" pill even though the *follow-up* model turn failed.
+    // Hardcoding `false` here would cause the user to retry, double-
+    // submitting Blajon's inbox.
     return jsonResponse(
       {
         error: "model_error",
-        reply:
-          "Sorry — I'm having trouble thinking right now. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.",
-        lead_submitted: false,
+        reply: leadSubmitted
+          ? "Got your details — Blajon's team will be in touch soon. (My follow-up reply hit a snag, but your request is in.)"
+          : "Sorry — I'm having trouble thinking right now. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.",
+        lead_submitted: leadSubmitted,
+        lead_error: leadError,
       },
       { status: 502 },
     );
