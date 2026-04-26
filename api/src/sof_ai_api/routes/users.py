@@ -29,6 +29,7 @@ from sqlmodel import Session, col, or_, select
 
 from ..db import get_session
 from ..models import UserProfile, _utcnow
+from ..settings import settings
 from ._signups_broker import broker, publish_signup_threadsafe, subscription
 from .wallet import require_internal_auth
 
@@ -505,7 +506,5 @@ def _expected_internal_auth_token() -> str:
     can't set headers on EventSource) without going through a Depends
     that would 401 before we reach the query-string fallback.
     """
-
-    from ..settings import settings
 
     return getattr(settings, "internal_api_key", "") or ""

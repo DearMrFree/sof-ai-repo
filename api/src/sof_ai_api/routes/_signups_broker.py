@@ -16,7 +16,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 
 class _Broker:
@@ -100,11 +101,9 @@ def publish_signup_threadsafe(
     if loop is None or not loop.is_running():
         return
     coro = broker.publish(event_name, payload)
-    try:
+    # Loop is closing — nothing we can do, the event is dropped.
+    with contextlib.suppress(RuntimeError):
         asyncio.run_coroutine_threadsafe(coro, loop)
-    except RuntimeError:
-        # Loop is closing — nothing we can do, the event is dropped.
-        pass
 
 
 async def heartbeats(interval_seconds: float = 15.0) -> AsyncIterator[str]:
