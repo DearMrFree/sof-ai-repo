@@ -86,6 +86,20 @@ class ProposeSkillIn(BaseModel):
     proposed_text: str = Field(min_length=1, max_length=2000)
 
 
+class RetractSkillIn(BaseModel):
+    """Body for the retract route — owner email only.
+
+    Originally the retract endpoint reused ``ProposeSkillIn`` for owner
+    verification, but that schema enforces ``proposed_text``
+    ``min_length=1``. The Web retract route legitimately has no
+    proposed text to send, so every retract from the browser returned
+    HTTP 422. A dedicated schema keeps the FastAPI gate clean and the
+    Web caller simple (Devin Review caught this on PR #42).
+    """
+
+    proposed_by_email: str = Field(min_length=3, max_length=200)
+
+
 class FinalizeSkillIn(BaseModel):
     status: str  # "applied" | "rejected"
     rejection_reason: str = ""
@@ -325,13 +339,13 @@ def finalize_skill(
 )
 def retract_skill(
     skill_id: int,
-    payload: ProposeSkillIn,  # we reuse ProposeSkillIn for the email field
+    payload: RetractSkillIn,
     session: Session = Depends(get_session),
 ) -> TwinSkillOut:
     """Owner retracts an applied (or pending) skill.
 
-    Note: ``ProposeSkillIn`` is reused as the request body for owner
-    verification only — its ``proposed_text`` is ignored on retract.
+    Body carries ``proposed_by_email`` only — see ``RetractSkillIn``
+    docstring for why this schema is separate from ``ProposeSkillIn``.
     """
     row = session.get(TwinSkill, skill_id)
     if row is None:
