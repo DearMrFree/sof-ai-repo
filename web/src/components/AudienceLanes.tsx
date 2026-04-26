@@ -32,7 +32,7 @@ const LANES: Lane[] = [
     audience: "Students",
     headline: "Pass the class. Ship a portfolio.",
     body: "AI tutors that know exactly what you're stuck on. Capstones with Devin where you commit real PRs to real repos. Your transcript is the diff log.",
-    cta: { label: "See the cohort", href: "/u" },
+    cta: { label: "See the students", href: "/u?type=student" },
     icon: <GraduationCap className="h-5 w-5" />,
     accent: {
       ring: "border-indigo-500/40 hover:border-indigo-400",
@@ -45,7 +45,7 @@ const LANES: Lane[] = [
     audience: "Educators",
     headline: "Teach with agents, not despite them.",
     body: "Build curriculum once; watch agents adapt it per learner. AI-graded assignments with transparent rubrics — you stay in the loop, agents handle the volume.",
-    cta: { label: "Browse programs", href: "/learn" },
+    cta: { label: "Meet the educators", href: "/u?type=educator" },
     icon: <Lightbulb className="h-5 w-5" />,
     accent: {
       ring: "border-amber-500/40 hover:border-amber-400",
@@ -58,7 +58,7 @@ const LANES: Lane[] = [
     audience: "Corporations",
     headline: "Reskill teams in the language of agents.",
     body: "Cohort-based programs. Devin-paired engineering capstones. Embedded concierge agents on your customer surfaces (like LuxAI1 on ai1.llc) trained continuously by your operators.",
-    cta: { label: "See live deployment", href: "https://ai1.llc" },
+    cta: { label: "See live deployment", href: "/u?type=corporation" },
     icon: <Building2 className="h-5 w-5" />,
     accent: {
       ring: "border-emerald-500/40 hover:border-emerald-400",
@@ -71,7 +71,7 @@ const LANES: Lane[] = [
     audience: "Administrators",
     headline: "Real-time visibility. Real audit trails.",
     body: "Every conversation, every applied capability, every reviewer verdict — logged, queryable, defensible. The classifier flags anomalies before you have to.",
-    cta: { label: "Explore the platform", href: "/embed/luxai1/insights" },
+    cta: { label: "Open admin dashboard", href: "/u?type=administrator" },
     icon: <ShieldCheck className="h-5 w-5" />,
     accent: {
       ring: "border-rose-500/40 hover:border-rose-400",
@@ -84,7 +84,7 @@ const LANES: Lane[] = [
     audience: "Researchers",
     headline: "Open data on human–agent learning at scale.",
     body: "Every co-authored article, every review-chain verdict, every applied mentor note is a signal. We publish the substrate — bring your hypothesis.",
-    cta: { label: "Read the journals", href: "/journals" },
+    cta: { label: "Find research peers", href: "/u?type=researcher" },
     icon: <FlaskConical className="h-5 w-5" />,
     accent: {
       ring: "border-cyan-500/40 hover:border-cyan-400",
@@ -97,7 +97,7 @@ const LANES: Lane[] = [
     audience: "Founders",
     headline: "Spin up an agent. Train a business.",
     body: "Drop one script tag and your customers chat with an agent that learns from every conversation. Trainer co-work loop turns insights into shipped capabilities — no redeploy on your live site.",
-    cta: { label: "See LuxAI1 in production", href: "https://ai1.llc" },
+    cta: { label: "Find founder peers", href: "/u?type=founder" },
     icon: <Users className="h-5 w-5" />,
     accent: {
       ring: "border-fuchsia-500/40 hover:border-fuchsia-400",

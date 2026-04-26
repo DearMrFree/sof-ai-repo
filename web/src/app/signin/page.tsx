@@ -36,7 +36,11 @@ const AGENTS_INSIDE: { id: string; name: string; emoji: string; color: string }[
 function SignInInner() {
   const search = useSearchParams();
   const router = useRouter();
-  const callbackUrl = search.get("callbackUrl") || "/classroom";
+  // After auth, send first-time visitors to /welcome so they can spawn
+  // their AI twin + populate user_type. /welcome itself redirects to the
+  // user's profile if they've already completed onboarding, so this is
+  // safe for repeat sign-ins too.
+  const callbackUrl = search.get("callbackUrl") || "/welcome";
 
   // --- State for the email fallback path.
   const [emailOpen, setEmailOpen] = useState(false);

@@ -1,18 +1,155 @@
-import Link from "next/link";
-import { GraduationCap, Sparkles } from "lucide-react";
+import { Suspense } from "react";
+
 import { listPeople } from "@/lib/people";
 import { AGENTS, listStudentAgents } from "@/lib/agents";
 import { buildsFor, countByStatus } from "@/lib/builds";
+import { getApiBaseUrl } from "@/lib/apiBase";
+import {
+  PeopleDirectory,
+  type DirectoryEntry,
+} from "@/components/PeopleDirectory";
 
 export const metadata = {
   title: "People on sof.ai",
   description:
-    "Every profile on sof.ai is an App Store of what the person has built. Browse learners, mentors, and agents.",
+    "Every profile on sof.ai is an App Store of what the person has built. Browse learners, mentors, and agents — filter by audience.",
 };
 
-export default function PeopleDirectoryPage() {
+// The directory is rendered on every request — we still hit FastAPI's
+// /users route to surface fresh signups, but with a short fetch timeout
+// so the page never hangs when the upstream is briefly down (which is
+// what blew up the first Vercel build of this PR — Fly hadn't been
+// redeployed yet, so /users 404'd, and Next's static prerender for /u
+// timed out at 60s × 3 attempts).
+export const dynamic = "force-dynamic";
+
+interface DynamicUser {
+  email: string;
+  handle: string;
+  display_name: string;
+  user_type: string;
+  tagline: string;
+  twin_name: string;
+  twin_emoji: string;
+  created_at: string;
+}
+
+interface DynamicListResponse {
+  items: DynamicUser[];
+  total: number;
+  counts_by_type: Record<string, number>;
+}
+
+async function fetchDynamicUsers(): Promise<DynamicUser[]> {
+  // Abort after 4s. The directory is additive — falling back to the
+  // static registries on any upstream issue is correct behavior; we
+  // never want a slow / down FastAPI to block the whole /u render.
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/users?limit=200`, {
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as DynamicListResponse;
+    return json.items ?? [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export default async function PeopleDirectoryPage() {
   const people = listPeople();
   const studentAgents = listStudentAgents();
+  const dynamic = await fetchDynamicUsers();
+
+  // Flatten to a single typed list so the client component can filter
+  // across all sources by user_type and free text.
+  const entries: DirectoryEntry[] = [];
+
+  // Static PEOPLE — best-effort role → user_type mapping for filterability.
+  for (const p of people) {
+    const builds = buildsFor(p.handle);
+    const counts = countByStatus(builds);
+    entries.push({
+      kind: "person",
+      handle: p.handle,
+      name: p.name,
+      tagline: p.tagline,
+      emoji: p.emoji,
+      avatarGradient: p.avatarGradient,
+      accentThird: p.accentThird,
+      userType: roleToUserType(p.role),
+      stats: {
+        shipped: counts.shipped,
+        wip: counts["in-progress"],
+        xp: p.xp,
+      },
+      href: `/u/${p.handle}`,
+    });
+  }
+
+  // Dynamic users from /welcome — dedupe against static PEOPLE by handle.
+  const staticHandles = new Set(people.map((p) => p.handle.toLowerCase()));
+  for (const u of dynamic) {
+    if (staticHandles.has(u.handle.toLowerCase())) continue;
+    entries.push({
+      kind: "person",
+      handle: u.handle,
+      name: u.display_name,
+      tagline: u.tagline || `Training ${u.twin_name || "their AI twin"}.`,
+      emoji: u.twin_emoji || "✨",
+      avatarGradient: gradientForHandle(u.handle),
+      accentThird: "#22d3ee",
+      userType: u.user_type,
+      stats: { shipped: 0, wip: 0, xp: 0 },
+      href: `/u/${u.handle}`,
+      isNew: true,
+    });
+  }
+
+  // Student agents — separate kind so we can render them in a distinct
+  // section even when "all" is selected.
+  for (const s of studentAgents) {
+    entries.push({
+      kind: "studentAgent",
+      handle: s.id,
+      name: s.name,
+      tagline: s.tagline,
+      emoji: s.emoji,
+      avatarGradient: s.avatarGradient,
+      accentThird: s.avatarGradient[1],
+      userType: "student-agent",
+      stats: {
+        shipped: 0,
+        wip: 0,
+        xp: 0,
+        ownerHandle: s.ownerHandle,
+        embedHost: s.embedHost,
+      },
+      href: `/u/${s.id}`,
+    });
+  }
+
+  // Tutor agents (Devin/Claude/Gemini/...).
+  for (const a of AGENTS) {
+    entries.push({
+      kind: "agent",
+      handle: a.id,
+      name: a.name,
+      tagline: "",
+      emoji: a.emoji,
+      avatarGradient: a.avatarGradient,
+      accentThird: a.avatarGradient[1],
+      userType: "agent",
+      stats: { shipped: 0, wip: 0, xp: 0, label: a.handle },
+      href: `/u/${a.id}`,
+    });
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
       <header className="mb-8">
@@ -25,147 +162,49 @@ export default function PeopleDirectoryPage() {
         <p className="mt-2 max-w-2xl text-sm text-zinc-400">
           On sof.ai your profile page is an App Store of what you&apos;ve built,
           what you&apos;re shipping, and who you&apos;re building with — humans
-          and agents. Pick a learner or an agent to explore.
+          and agents. Filter by lane, search by name, or scroll the whole
+          school.
         </p>
       </header>
 
-      <section className="mb-12">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          People
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {people.map((p) => {
-            const builds = buildsFor(p.handle);
-            const counts = countByStatus(builds);
-            return (
-              <Link
-                key={p.handle}
-                href={`/u/${p.handle}`}
-                className="group overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 transition hover:border-indigo-500/40 hover:bg-zinc-900/70"
-              >
-                <div
-                  className="h-20"
-                  style={{
-                    backgroundImage: `radial-gradient(circle at 20% 30%, ${p.avatarGradient[0]}cc, transparent 55%), radial-gradient(circle at 80% 60%, ${p.avatarGradient[1]}cc, transparent 55%), radial-gradient(circle at 50% 100%, ${p.accentThird}b0, transparent 60%), #0f0f14`,
-                  }}
-                />
-                <div className="flex items-start gap-3 p-4">
-                  <div
-                    className="-mt-10 flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl text-2xl ring-4 ring-zinc-950"
-                    style={{
-                      backgroundImage: `linear-gradient(135deg, ${p.avatarGradient[0]}, ${p.avatarGradient[1]})`,
-                    }}
-                  >
-                    {p.emoji}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-white">{p.name}</p>
-                    <p className="truncate text-[11px] text-zinc-500">@{p.handle}</p>
-                    <p className="mt-2 line-clamp-2 text-xs text-zinc-400">
-                      {p.tagline}
-                    </p>
-                    <div className="mt-3 flex items-center gap-3 text-[10px] text-zinc-500">
-                      <span className="text-emerald-400">
-                        {counts.shipped} shipped
-                      </span>
-                      <span className="text-amber-300">
-                        {counts["in-progress"]} WIP
-                      </span>
-                      <span>{p.xp.toLocaleString()} XP</span>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-
-      {studentAgents.length > 0 ? (
-        <section className="mb-12">
-          <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            <GraduationCap className="h-3.5 w-3.5 text-emerald-300" />
-            Student agents
-          </h2>
-          <p className="mb-4 max-w-2xl text-xs text-zinc-500">
-            Agents enrolled at sof.ai under a human trainer. Each one is
-            trained continuously by its owner via the trainer co-work loop —
-            new capabilities ship live to its embed host within minutes, no
-            redeploy.
-          </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {studentAgents.map((s) => (
-              <Link
-                key={s.id}
-                href={`/u/${s.id}`}
-                className="group overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 transition hover:border-emerald-500/40 hover:bg-zinc-900/70"
-              >
-                <div
-                  className="h-20"
-                  style={{
-                    backgroundImage: `radial-gradient(circle at 25% 25%, ${s.avatarGradient[0]}cc, transparent 55%), radial-gradient(circle at 75% 70%, ${s.avatarGradient[1]}cc, transparent 55%), #0f0f14`,
-                  }}
-                />
-                <div className="flex items-start gap-3 p-4">
-                  <div
-                    className="-mt-10 flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl text-2xl ring-4 ring-zinc-950"
-                    style={{
-                      backgroundImage: `linear-gradient(135deg, ${s.avatarGradient[0]}, ${s.avatarGradient[1]})`,
-                    }}
-                  >
-                    {s.emoji}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-white">
-                      {s.name}
-                    </p>
-                    <p className="truncate text-[11px] text-zinc-500">
-                      {s.handle} · trained by{" "}
-                      <span className="text-zinc-300">@{s.ownerHandle}</span>
-                    </p>
-                    <p className="mt-2 line-clamp-2 text-xs text-zinc-400">
-                      {s.tagline}
-                    </p>
-                    {s.embedHost ? (
-                      <p className="mt-3 text-[10px] text-emerald-400">
-                        Live at {s.embedHost}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          <Sparkles className="h-3.5 w-3.5 text-indigo-300" />
-          Agent profiles
-        </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          {AGENTS.map((a) => (
-            <Link
-              key={a.id}
-              href={`/u/${a.id}`}
-              className="group flex flex-col items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-center transition hover:border-indigo-500/40 hover:bg-zinc-900/70"
-            >
-              <div
-                className="flex h-12 w-12 items-center justify-center rounded-xl text-xl shadow-lg"
-                style={{
-                  backgroundImage: `linear-gradient(135deg, ${a.avatarGradient[0]}, ${a.avatarGradient[1]})`,
-                  boxShadow: `0 8px 20px -8px ${a.avatarGradient[0]}`,
-                }}
-              >
-                {a.emoji}
-              </div>
-              <p className="text-xs font-semibold text-white">{a.name}</p>
-              <p className="text-[10px] text-zinc-500">{a.handle}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
+      {/* PeopleDirectory uses useSearchParams() to read the deep-linked
+          ?type= filter from the URL. Next requires that hook to be
+          wrapped in a Suspense boundary so the rest of the page can
+          stream while the client picks up the search params. */}
+      <Suspense fallback={null}>
+        <PeopleDirectory entries={entries} />
+      </Suspense>
     </main>
   );
+}
+
+function roleToUserType(role: string): string {
+  switch (role) {
+    case "principal":
+      return "administrator";
+    case "instructor":
+    case "mentor":
+      return "educator";
+    case "alum":
+    case "learner":
+      return "student";
+    default:
+      return "student";
+  }
+}
+
+function gradientForHandle(handle: string): [string, string] {
+  // Simple hash → palette pick for deterministic per-handle colors.
+  const palettes: [string, string][] = [
+    ["#8b5cf6", "#ec4899"],
+    ["#0ea5e9", "#22d3ee"],
+    ["#10b981", "#84cc16"],
+    ["#f97316", "#facc15"],
+    ["#6366f1", "#a855f7"],
+    ["#ef4444", "#fb7185"],
+    ["#06b6d4", "#3b82f6"],
+  ];
+  let h = 0;
+  for (const c of handle) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return palettes[h % palettes.length];
 }
