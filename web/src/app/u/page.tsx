@@ -15,9 +15,13 @@ export const metadata = {
     "Every profile on sof.ai is an App Store of what the person has built. Browse learners, mentors, and agents — filter by audience.",
 };
 
-// Re-render every 30s — the directory should feel near-real-time as new
-// signups come in. Search/filter is client-side over the rendered set.
-export const revalidate = 30;
+// The directory is rendered on every request — we still hit FastAPI's
+// /users route to surface fresh signups, but with a short fetch timeout
+// so the page never hangs when the upstream is briefly down (which is
+// what blew up the first Vercel build of this PR — Fly hadn't been
+// redeployed yet, so /users 404'd, and Next's static prerender for /u
+// timed out at 60s × 3 attempts).
+export const dynamic = "force-dynamic";
 
 interface DynamicUser {
   email: string;
@@ -37,16 +41,23 @@ interface DynamicListResponse {
 }
 
 async function fetchDynamicUsers(): Promise<DynamicUser[]> {
+  // Abort after 4s. The directory is additive — falling back to the
+  // static registries on any upstream issue is correct behavior; we
+  // never want a slow / down FastAPI to block the whole /u render.
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 4000);
   try {
     const res = await fetch(`${getApiBaseUrl()}/users?limit=200`, {
-      next: { revalidate: 30 },
+      signal: ctrl.signal,
+      cache: "no-store",
     });
     if (!res.ok) return [];
     const json = (await res.json()) as DynamicListResponse;
     return json.items ?? [];
   } catch {
-    // Soft-fail: dynamic registry is additive on top of the static one.
     return [];
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
