@@ -212,30 +212,37 @@ def create_enrollment(
         e = existing
 
     # Merge professors by (email, role) — re-adding the same row is a no-op.
+    # Each insert is wrapped in its own SAVEPOINT so a unique-constraint
+    # collision on one row (caused by a concurrent caller racing on the
+    # same (enrollment, email, role)) only discards that one row, not
+    # the rest of the batch. Without the savepoint, a single conflict
+    # would roll back every professor we'd queued, silently dropping
+    # non-conflicting rows.
     existing_professors = _load_professors(session, e.id or 0)
     seen = {(p.professor_email.lower(), p.role) for p in existing_professors}
     for prof in body.professors:
         key = (prof.professor_email.strip().lower(), prof.role)
         if key in seen:
             continue
-        session.add(
-            StudentProfessor(
-                student_enrollment_id=e.id or 0,
-                professor_email=prof.professor_email.strip().lower(),
-                professor_name=prof.professor_name,
-                professor_kind=prof.professor_kind,
-                role=prof.role,
-                added_at=now,
-            )
-        )
         seen.add(key)
-    try:
-        session.commit()
-    except IntegrityError:
-        # Concurrent caller already inserted some/all of these professor
-        # rows. The unique constraint did its job — re-load and serialize
-        # so the response reflects the converged state.
-        session.rollback()
+        sp = StudentProfessor(
+            student_enrollment_id=e.id or 0,
+            professor_email=prof.professor_email.strip().lower(),
+            professor_name=prof.professor_name,
+            professor_kind=prof.professor_kind,
+            role=prof.role,
+            added_at=now,
+        )
+        try:
+            with session.begin_nested():
+                session.add(sp)
+        except IntegrityError:
+            # Concurrent caller already inserted this exact (enrollment,
+            # email, role). The unique constraint did its job; the
+            # outer transaction is unaffected because the savepoint
+            # only rolls back this one row.
+            pass
+    session.commit()
 
     return _serialize_enrollment(e, _load_professors(session, e.id or 0))
 

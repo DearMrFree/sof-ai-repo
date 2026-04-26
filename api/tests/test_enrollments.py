@@ -161,6 +161,111 @@ def test_patch_updates_status_and_notes() -> None:
     assert "12 articles" in out["notes"]
 
 
+def test_professor_batch_savepoint_isolates_conflicts() -> None:
+    """Regression: when one professor in a batch fails the unique
+    constraint (e.g. a concurrent caller inserted the same row between
+    our SELECT and our INSERT), the other professors in the batch must
+    still land. The previous logic used a single ``session.commit()``
+    with ``try/except IntegrityError`` that rolled back the entire
+    batch, silently dropping non-conflicting rows.
+
+    We simulate the race by:
+      1. Creating an enrollment.
+      2. Inserting a professor row directly into the DB (the "racing"
+         caller's insert).
+      3. Monkey-patching ``_load_professors`` to lie on the first call
+         so the in-memory ``seen`` check doesn't catch the racing row,
+         which forces the IntegrityError path inside the loop.
+      4. Re-POSTing with both the conflicting and a fresh professor.
+
+    Expected result: the fresh professor lands; the conflicting one is
+    silently skipped; all earlier-existing professors are still there.
+    """
+    from sof_ai_api.db import engine as _engine
+    from sof_ai_api.models import StudentProfessor as _SP, _utcnow as _now
+    from sof_ai_api.routes import enrollments as _routes
+    from sqlmodel import Session as _Session
+
+    e = _create(
+        student_email="savepoint@ai1.example",
+        application_id=9101,
+    )
+    enrollment_id = e["id"]
+
+    # Pre-existing professors from _create(): freedom + devin (role=lead).
+    # Insert a third row directly to mimic a concurrent caller's insert.
+    with _Session(_engine) as s:
+        s.add(
+            _SP(
+                student_enrollment_id=enrollment_id,
+                professor_email="racer@example.com",
+                professor_name="Racer",
+                professor_kind="human",
+                role="guest",
+                added_at=_now(),
+            )
+        )
+        s.commit()
+
+    # Lie to the route on the first _load_professors() call so the
+    # racer row isn't pre-skipped by the in-memory seen check. The
+    # second call (serializer at the end) uses the real loader.
+    real_load = _routes._load_professors
+    calls = {"n": 0}
+
+    def lying_load(session, eid):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return []
+        return real_load(session, eid)
+
+    _routes._load_professors = lying_load
+    try:
+        r = client.post(
+            "/student-enrollments",
+            json={
+                "application_id": 9101,
+                "student_name": "Blajon Lux",
+                "student_email": "savepoint@ai1.example",
+                "agent_name": "LuxAI1",
+                "professors": [
+                    # Will race-collide with the row inserted above.
+                    {
+                        "professor_email": "racer@example.com",
+                        "professor_name": "Racer",
+                        "role": "guest",
+                    },
+                    # Must still land despite the sibling collision.
+                    {
+                        "professor_email": "newcomer@example.com",
+                        "professor_name": "Newcomer",
+                        "role": "co_lead",
+                    },
+                ],
+            },
+            headers=AUTH,
+        )
+    finally:
+        _routes._load_professors = real_load
+
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["id"] == enrollment_id  # idempotent merge
+    emails = {p["professor_email"] for p in out["professors"]}
+    # The racer row pre-existed (one copy, not duplicated).
+    assert "racer@example.com" in emails
+    # The non-conflicting newcomer landed even though its sibling
+    # collided — proves the savepoint isolated the failure.
+    assert "newcomer@example.com" in emails
+    # Earlier professors from the first _create() are still there.
+    assert "freedom@thevrschool.org" in emails
+    assert "devin@sof.ai" in emails
+
+    # No duplication of the racer row (would indicate the savepoint
+    # didn't actually roll the conflicting insert back).
+    assert sum(1 for p in out["professors"] if p["professor_email"] == "racer@example.com") == 1
+
+
 def test_create_idempotent_on_application_id() -> None:
     """Same application_id → same enrollment (merges new professors)."""
     e1 = _create(student_email="idemp@ai1.example", application_id=42)
