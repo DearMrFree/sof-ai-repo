@@ -578,7 +578,6 @@ class StudentEnrollment(SQLModel, table=True):
 class StudentProfessor(SQLModel, table=True):
     """A professor (human or AI) attached to a student's StudentEnrollment.
 
-
     Many-to-many: a single human can mentor multiple students, and a
     single student has multiple professors (typically one human lead +
     one AI lead, plus optional co-leads/guests). Identity is by
@@ -589,7 +588,21 @@ class StudentProfessor(SQLModel, table=True):
     ``role`` lifecycle: ``lead`` (primary mentor; min 1 required for an
     active enrollment), ``co_lead`` (shares responsibility), ``guest``
     (occasional consult, e.g. Gemini for visual reviews).
+
+    The ``(student_enrollment_id, professor_email, role)`` UniqueConstraint
+    backs up the SELECT-then-INSERT idempotency in ``add_professor`` /
+    ``create_enrollment``, which alone has a TOCTOU race under concurrent
+    requests.
     """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "student_enrollment_id",
+            "professor_email",
+            "role",
+            name="uq_student_professor_role",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     student_enrollment_id: int = Field(index=True)

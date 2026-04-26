@@ -331,5 +331,9 @@ def remove_professor(
     p = session.get(StudentProfessor, professor_id)
     if not p or p.student_enrollment_id != enrollment_id:
         raise HTTPException(status_code=404, detail="professor not found")
+    e = session.get(StudentEnrollment, enrollment_id)
     session.delete(p)
+    if e:
+        e.updated_at = _utcnow()
+        session.add(e)
     session.commit()
