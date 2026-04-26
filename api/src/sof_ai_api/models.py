@@ -231,6 +231,13 @@ class JournalArticle(SQLModel, table=True):
     pipeline_phase: Optional[str] = Field(default=None, index=True)
     pipeline_started_at: Optional[datetime] = Field(default=None)
     pipeline_completed_at: Optional[datetime] = Field(default=None)
+    # Cross-journal "Inspire from URL" feature. When set, this is the
+    # external URL the author handed to sof.ai as inspiration. The article
+    # body is original — sof.ai uses the URL's text only as context for
+    # the LLM that produced the first draft. Persisting the URL keeps a
+    # provenance trail so reviewers can compare the published article
+    # against its starting point.
+    source_url: Optional[str] = Field(default=None, max_length=2000)
     # OJS federation (Phase 2). OJS submission id is the foreign key in the
     # real OJS database once this article has been mirrored.
     ojs_submission_id: Optional[int] = Field(default=None, index=True)

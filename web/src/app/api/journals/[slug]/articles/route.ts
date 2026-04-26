@@ -67,6 +67,7 @@ export async function POST(
     abstract?: unknown;
     body?: unknown;
     coauthors?: unknown;
+    source_url?: unknown;
   };
 
   const title = typeof p.title === "string" ? p.title.trim() : "";
@@ -76,6 +77,21 @@ export async function POST(
   const coauthors = Array.isArray(p.coauthors)
     ? p.coauthors.filter((c): c is string => typeof c === "string").slice(0, 40)
     : [];
+  // source_url is optional. We accept http(s) only and cap length to keep
+  // FastAPI's max_length=2000 honored before the round-trip.
+  let sourceUrl: string | null = null;
+  if (typeof p.source_url === "string") {
+    const trimmed = p.source_url.trim().slice(0, 2000);
+    if (trimmed.length > 0) {
+      if (!/^https?:\/\//i.test(trimmed)) {
+        return NextResponse.json(
+          { error: "Source URL must start with http:// or https://." },
+          { status: 400 },
+        );
+      }
+      sourceUrl = trimmed;
+    }
+  }
 
   if (title.length < 2 || title.length > 300) {
     return NextResponse.json(
@@ -97,6 +113,7 @@ export async function POST(
           coauthors,
           submitter_type: "user",
           submitter_id: sessionUser.id,
+          source_url: sourceUrl,
         }),
         cache: "no-store",
       },
