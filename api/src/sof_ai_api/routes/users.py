@@ -17,16 +17,19 @@ Routes:
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, or_, select
 
 from ..db import get_session
 from ..models import UserProfile, _utcnow
+from ._signups_broker import broker, publish_signup_threadsafe, subscription
 from .wallet import require_internal_auth
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -176,6 +179,43 @@ def _validate_user_type(user_type: str) -> str:
     return t
 
 
+def _public_signup_payload(out: UserProfileOut) -> dict[str, Any]:
+    """Trim the SSE payload to public-safe fields.
+
+    Email is **deliberately** stripped — the SSE stream is intended for
+    operators (admins) but the principle of least exposure says we
+    should only ship what the dashboard actually renders. Anything
+    extra here would leak through to anyone who manages to scrape the
+    proxy. The dashboard renders handle / display_name / user_type /
+    twin so that's what we publish.
+    """
+
+    return {
+        "id": out.id,
+        "handle": out.handle,
+        "display_name": out.display_name,
+        "user_type": out.user_type,
+        "tagline": out.tagline,
+        "twin_name": out.twin_name,
+        "twin_emoji": out.twin_emoji,
+        "created_at": out.created_at,
+        "updated_at": out.updated_at,
+    }
+
+
+def _publish_signup_event(event_name: str, out: UserProfileOut) -> None:
+    """Best-effort publish — never blocks or raises into the request path.
+
+    The onboarding upsert handler is a sync def (SQLModel sessions are
+    sync), so FastAPI runs it on an anyio worker thread. The broker
+    captured the running event loop on its first subscription; we use
+    that reference to schedule the publish coroutine. If no subscriber
+    has ever connected, ``loop`` is None and the publish is a no-op.
+    """
+
+    publish_signup_threadsafe(broker.loop, event_name, _public_signup_payload(out))
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -235,7 +275,9 @@ def upsert_onboarding(
             session.rollback()
             raise HTTPException(status_code=409, detail="handle taken") from e
         session.refresh(existing)
-        return UserProfileOut.from_row(existing)
+        out = UserProfileOut.from_row(existing)
+        _publish_signup_event("profile.updated", out)
+        return out
 
     row = UserProfile(
         email=email,
@@ -259,7 +301,9 @@ def upsert_onboarding(
         session.rollback()
         raise HTTPException(status_code=409, detail="email or handle taken") from e
     session.refresh(row)
-    return UserProfileOut.from_row(row)
+    out = UserProfileOut.from_row(row)
+    _publish_signup_event("profile.created", out)
+    return out
 
 
 @router.get("/{email}", response_model=UserProfileOut)
@@ -371,3 +415,97 @@ def list_recent(
         total=len(total),
         counts_by_type=counts,
     )
+
+
+# ---------------------------------------------------------------------------
+# Real-time admin stream
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/stream")
+async def admin_signup_stream(
+    request: Request,
+    auth: Optional[str] = Query(default=None, description="Internal auth token"),
+) -> StreamingResponse:
+    """Server-Sent Events stream of new-signup events.
+
+    Browsers can't add custom headers to ``EventSource`` requests, so the
+    internal auth token is also accepted as a ``?auth=`` query string
+    here. The web-side proxy sets it from a server-side env var so the
+    token never leaves the trusted process.
+
+    Emits:
+    - ``profile.created`` — payload is ``_public_signup_payload(...)``
+    - ``profile.updated`` — same shape (re-onboarding by same email)
+
+    Plus periodic ``:hb`` comment lines every 15s for keep-alive.
+    """
+
+    # ---- Auth (header OR query). ----
+    # Mirrors the require_internal_auth() gate: empty ``internal_api_key``
+    # disables the gate (used by local dev + the pytest TestClient suite).
+    # Otherwise the supplied token must match exactly.
+    expected = _expected_internal_auth_token()
+    if expected:
+        header_token = request.headers.get("X-Internal-Auth")
+        supplied = header_token or auth or ""
+        if supplied != expected:
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    async def event_generator():
+        # Open the channel.
+        yield ":connected\n\n"
+        async with subscription() as q:
+            heartbeat_task = asyncio.create_task(_sleep_seconds(15.0))
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    get_task = asyncio.create_task(q.get())
+                    done, _pending = await asyncio.wait(
+                        {get_task, heartbeat_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                        timeout=None,
+                    )
+                    if heartbeat_task in done:
+                        # Reset heartbeat clock.
+                        heartbeat_task = asyncio.create_task(_sleep_seconds(15.0))
+                        if get_task not in done:
+                            get_task.cancel()
+                        yield ":hb\n\n"
+                        continue
+                    if get_task in done:
+                        frame = get_task.result()
+                        yield frame
+            finally:
+                heartbeat_task.cancel()
+
+    headers = {
+        # Browsers will reconnect after 3s by default. Tell intermediaries
+        # not to buffer (Cloudflare/Vercel) and not to cache.
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=headers,
+    )
+
+
+async def _sleep_seconds(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
+def _expected_internal_auth_token() -> str:
+    """Read the same token ``require_internal_auth`` checks against.
+
+    Inlined here so the SSE handler can fall back to ``?auth=`` (browsers
+    can't set headers on EventSource) without going through a Depends
+    that would 401 before we reach the query-string fallback.
+    """
+
+    from ..settings import settings
+
+    return getattr(settings, "internal_api_key", "") or ""
