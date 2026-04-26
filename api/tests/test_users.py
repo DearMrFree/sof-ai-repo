@@ -12,6 +12,9 @@ Coverage:
 """
 from __future__ import annotations
 
+import asyncio
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, delete
@@ -19,6 +22,8 @@ from sqlmodel import Session, delete
 from sof_ai_api.db import engine, init_db
 from sof_ai_api.main import app
 from sof_ai_api.models import UserProfile
+from sof_ai_api.routes._signups_broker import broker
+from sof_ai_api.routes.users import _multiplex_queue_with_heartbeat
 from sof_ai_api.settings import settings
 
 # NOTE: do NOT set INTERNAL_API_KEY in os.environ at module-import time —
@@ -287,11 +292,6 @@ def test_signup_publishes_to_broker_with_public_payload() -> None:
     leave the queue empty (count==0); a regression where the payload
     leaks email would fail the ``email not in body`` assertion.
     """
-    import asyncio as _asyncio
-    import json as _json
-
-    from sof_ai_api.routes._signups_broker import broker
-
     async def _drive() -> tuple[list[str], list[dict[str, object]]]:
         # Subscribe FIRST so the broker captures the running loop and
         # adds our queue before the publish lands.
@@ -300,12 +300,12 @@ def test_signup_publishes_to_broker_with_public_payload() -> None:
             # Run the sync TestClient call on a worker thread (mirrors how
             # FastAPI runs sync request handlers IRL — the publish then
             # round-trips back via run_coroutine_threadsafe).
-            await _asyncio.to_thread(
+            await asyncio.to_thread(
                 lambda: client.post(
                     "/users/onboarding", headers=AUTH, json=_payload()
                 )
             )
-            await _asyncio.to_thread(
+            await asyncio.to_thread(
                 lambda: client.post(
                     "/users/onboarding",
                     headers=AUTH,
@@ -314,7 +314,7 @@ def test_signup_publishes_to_broker_with_public_payload() -> None:
             )
             frames: list[str] = []
             for _ in range(2):
-                frame = await _asyncio.wait_for(q.get(), timeout=3.0)
+                frame = await asyncio.wait_for(q.get(), timeout=3.0)
                 frames.append(frame)
             payloads: list[dict[str, object]] = []
             event_names: list[str] = []
@@ -323,12 +323,12 @@ def test_signup_publishes_to_broker_with_public_payload() -> None:
                 lines = f.strip().split("\n")
                 event_names.append(lines[0].removeprefix("event: ").strip())
                 data = lines[1].removeprefix("data: ")
-                payloads.append(_json.loads(data))
+                payloads.append(json.loads(data))
             return event_names, payloads
         finally:
             await broker.unsubscribe(q)
 
-    event_names, payloads = _asyncio.run(_drive())
+    event_names, payloads = asyncio.run(_drive())
     assert event_names == ["profile.created", "profile.updated"], event_names
     assert all(p.get("handle") == "ada" for p in payloads), payloads
     # Email is deliberately stripped from the public SSE payload.
@@ -363,12 +363,8 @@ def test_multiplex_yields_queue_frame_when_heartbeat_fires_concurrently() -> Non
     A regression that re-introduces the mutually-exclusive branching
     will produce zero data frames here (only heartbeats).
     """
-    import asyncio as _asyncio
-
-    from sof_ai_api.routes.users import _multiplex_queue_with_heartbeat
-
     async def _drive() -> list[str]:
-        q: _asyncio.Queue[str] = _asyncio.Queue()
+        q: asyncio.Queue[str] = asyncio.Queue()
         await q.put("event: profile.created\ndata: {\"id\":1}\n\n")
         await q.put("event: profile.created\ndata: {\"id\":2}\n\n")
 
@@ -383,7 +379,7 @@ def test_multiplex_yields_queue_frame_when_heartbeat_fires_concurrently() -> Non
         try:
             # Pull a bounded number of chunks to avoid an infinite hb loop.
             for _ in range(20):
-                chunk = await _asyncio.wait_for(agen.__anext__(), timeout=1.0)
+                chunk = await asyncio.wait_for(agen.__anext__(), timeout=1.0)
                 out.append(chunk)
                 # Stop once we've seen both data frames.
                 data_seen = sum(
@@ -395,7 +391,7 @@ def test_multiplex_yields_queue_frame_when_heartbeat_fires_concurrently() -> Non
             await agen.aclose()
         return out
 
-    chunks = _asyncio.run(_drive())
+    chunks = asyncio.run(_drive())
     data_chunks = [c for c in chunks if c.startswith("event: profile.")]
     assert len(data_chunks) == 2, f"Expected both frames; got {chunks}"
     assert "\"id\":1" in data_chunks[0]

@@ -480,7 +480,7 @@ async def _sleep_seconds(seconds: float) -> None:
 
 
 async def _multiplex_queue_with_heartbeat(
-    q: "asyncio.Queue[str]",
+    q: asyncio.Queue[str],
     is_disconnected,
     *,
     heartbeat_seconds: float,
