@@ -17,7 +17,7 @@ import { authOptions } from "@/lib/auth";
 import { sendEmail, renderReviewerEmail } from "@/lib/applications/email";
 import { signReviewToken } from "@/lib/applications/token";
 import { APPROVER_EMAIL, TRIO } from "@/lib/applications/trio";
-import { apiBase } from "@/lib/apiBase";
+import { getApiBaseUrl } from "@/lib/apiBase";
 
 export const runtime = "nodejs";
 
@@ -65,7 +65,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid id." }, { status: 400 });
   }
 
-  const appRes = await fetch(`${apiBase()}/applications/${id}`, {
+  const appRes = await fetch(`${getApiBaseUrl()}/applications/${id}`, {
     cache: "no-store",
   });
   if (!appRes.ok) {
