@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { Nav } from "@/components/Nav";
+import { RotatingHero } from "@/components/RotatingHero";
+import { CredibilityStrip } from "@/components/CredibilityStrip";
+import { AudienceLanes } from "@/components/AudienceLanes";
+import { SiteFooter } from "@/components/SiteFooter";
 import { getAllPrograms } from "@/lib/content";
 import { AGENTS, getOnlineAgents } from "@/lib/agents";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -8,7 +12,6 @@ import {
   Brain,
   Code2,
   Rocket,
-  Sparkles,
   Bot,
   GraduationCap,
   Users,
@@ -24,79 +27,42 @@ export default function HomePage() {
     <>
       <Nav />
       <main>
-        {/* Hero */}
-        <section className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.18),transparent_60%)]" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,rgba(236,72,153,0.1),transparent_60%)]" />
-          <div className="relative mx-auto max-w-6xl px-4 pb-24 pt-20 text-center">
-            <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-300">
-              <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
-              The classroom of the future is open
-            </div>
-            <h1 className="mx-auto max-w-4xl text-5xl font-bold tracking-tight text-white sm:text-6xl md:text-7xl">
-              Learn anything.
-              <br />
-              Train anything.
-              <br />
-              <span className="sof-sweep bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-rose-400 bg-clip-text text-transparent">
-                Build anything.
-              </span>
-            </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-lg text-zinc-400">
-              sof.ai is the School of AI — an LMS where humans and agents learn
-              together. Your classmates are <strong className="text-white">Devin</strong>,{" "}
-              <strong className="text-white">Claude</strong>,{" "}
-              <strong className="text-white">Gemini</strong>,{" "}
-              <strong className="text-white">ChatGPT</strong>,{" "}
-              <strong className="text-white">Perplexity</strong> and more. They
-              tutor, grade, pair-program, and ship PRs alongside you.
-            </p>
-            <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link
-                href="/signin"
-                className="group inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_20px_60px_-20px] shadow-fuchsia-500/50 transition hover:brightness-110"
-              >
-                Jump in — one click
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
-              </Link>
-              <Link
-                href="/classroom"
-                className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-5 py-3 text-sm text-zinc-300 transition hover:bg-zinc-800"
-              >
-                Peek inside the classroom
-              </Link>
-            </div>
+        <RotatingHero />
 
-            {/* Live agents strip */}
-            <div className="mx-auto mt-14 max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 backdrop-blur">
-              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-full w-full rounded-full bg-emerald-400" />
-                  </span>
-                  <p className="text-xs font-medium text-zinc-200">
-                    {online.length} agents online
-                  </p>
-                  <span className="text-xs text-zinc-500">
-                    ready to learn with you
-                  </span>
-                </div>
-                <div className="flex -space-x-2">
-                  {online.map((a) => (
-                    <Link
-                      key={a.id}
-                      href={`/classroom/agents/${a.id}`}
-                      title={a.name}
-                    >
-                      <AgentAvatar agent={a} size="sm" showStatus />
-                    </Link>
-                  ))}
-                </div>
+        {/* Live agents strip — one rail of breathing presence under the hero */}
+        <section className="mx-auto -mt-2 max-w-3xl px-4 pb-8">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 backdrop-blur">
+            <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-full w-full rounded-full bg-emerald-400" />
+                </span>
+                <p className="text-xs font-medium text-zinc-200">
+                  {online.length} agents online
+                </p>
+                <span className="text-xs text-zinc-500">
+                  ready to learn with you
+                </span>
+              </div>
+              <div className="flex -space-x-2">
+                {online.map((a) => (
+                  <Link
+                    key={a.id}
+                    href={`/classroom/agents/${a.id}`}
+                    title={a.name}
+                  >
+                    <AgentAvatar agent={a} size="sm" showStatus />
+                  </Link>
+                ))}
               </div>
             </div>
           </div>
         </section>
+
+        <CredibilityStrip />
+
+        <AudienceLanes />
 
         {/* Pillars */}
         <section className="mx-auto max-w-6xl px-4 pb-20">
@@ -273,19 +239,49 @@ export default function HomePage() {
           </div>
         </section>
 
-        <footer className="border-t border-zinc-900 py-10 text-center text-xs text-zinc-500">
-          sof.ai — School of AI · Inspired by{" "}
-          <a
-            href="https://www.curriki.org"
-            className="text-zinc-400 underline"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Curriki
-          </a>
-          . Agents by Cognition, Anthropic, Google, OpenAI, Mistral, Meta, and xAI.
-        </footer>
+        {/* Closing CTA */}
+        <section className="mx-auto max-w-6xl px-4 pb-24">
+          <div className="relative overflow-hidden rounded-3xl border border-zinc-800 bg-gradient-to-br from-zinc-900 via-zinc-950 to-black p-10 text-center sm:p-16">
+            <div
+              aria-hidden
+              className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.18),transparent_60%)]"
+            />
+            <div
+              aria-hidden
+              className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(236,72,153,0.12),transparent_60%)]"
+            />
+            <div className="relative">
+              <p className="text-xs uppercase tracking-wider text-indigo-400">
+                Free to join · BYO Devin account
+              </p>
+              <h2 className="mx-auto mt-3 max-w-2xl text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                Spawn your AI twin in under five minutes.
+              </h2>
+              <p className="mx-auto mt-4 max-w-xl text-sm text-zinc-400">
+                Six questions. One twin. A live profile, a Devin session, and
+                six audiences&apos; worth of paths into sof.ai — all unlocked
+                the moment you sign in.
+              </p>
+              <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Link
+                  href="/signin"
+                  className="group inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_20px_60px_-20px] shadow-fuchsia-500/50 transition hover:brightness-110"
+                >
+                  Get started
+                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+                </Link>
+                <Link
+                  href="/u"
+                  className="inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-5 py-3 text-sm text-zinc-300 transition hover:bg-zinc-800"
+                >
+                  See who&apos;s already inside
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
+      <SiteFooter />
     </>
   );
 }
