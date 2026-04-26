@@ -188,7 +188,10 @@ export default async function TrainerConsolePage(props: {
   const data = await loadList(slug);
 
   const sourceInsightId = from_insight ? Number.parseInt(from_insight, 10) : null;
-  const initialText = suggested ? decodeURIComponent(suggested) : "";
+  // Next.js automatically decodes searchParams. Decoding again would throw
+  // URIError on natural-language text with bare `%` characters and silently
+  // corrupt strings like "%50" — see Devin Review on PR #35.
+  const initialText = suggested ?? "";
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
