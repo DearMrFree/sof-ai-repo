@@ -315,31 +315,31 @@ def test_status_filter_pushed_into_sql_respects_limit() -> None:
     # Two batches of seeds. Backdate the abandoned set so they sort
     # earlier than the active set (last_turn_at desc) — otherwise the
     # broken implementation would happen to give the right answer.
-    from sof_ai_api.models import EmbedConversation as _EC
-
     with Session(engine) as session:
         for i in range(4):
-            row = _EC(
-                agent_slug="luxai1_filter",
-                client_thread_id=f"thr_filter_aband_{i}",
-                owner_email="luxservicesbayarea@gmail.com",
-                turn_count=1,
-                transcript_json='[{"role":"user","content":"x"}]',
-                customer_meta_json="{}",
-                status="abandoned",
+            session.add(
+                EmbedConversation(
+                    agent_slug="luxai1_filter",
+                    client_thread_id=f"thr_filter_aband_{i}",
+                    owner_email="luxservicesbayarea@gmail.com",
+                    turn_count=1,
+                    transcript_json='[{"role":"user","content":"x"}]',
+                    customer_meta_json="{}",
+                    status="abandoned",
+                )
             )
-            session.add(row)
         for i in range(3):
-            row = _EC(
-                agent_slug="luxai1_filter",
-                client_thread_id=f"thr_filter_active_{i}",
-                owner_email="luxservicesbayarea@gmail.com",
-                turn_count=1,
-                transcript_json='[{"role":"user","content":"x"}]',
-                customer_meta_json="{}",
-                status="active",
+            session.add(
+                EmbedConversation(
+                    agent_slug="luxai1_filter",
+                    client_thread_id=f"thr_filter_active_{i}",
+                    owner_email="luxservicesbayarea@gmail.com",
+                    turn_count=1,
+                    transcript_json='[{"role":"user","content":"x"}]',
+                    customer_meta_json="{}",
+                    status="active",
+                )
             )
-            session.add(row)
         session.commit()
 
     r = client.get(
