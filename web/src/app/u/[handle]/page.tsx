@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getServerSession } from "next-auth";
 import {
   BookOpen,
   CalendarDays,
@@ -14,12 +15,25 @@ import {
 import { getPerson, listPeople } from "@/lib/people";
 import { AGENTS, getStudentAgent, listStudentAgents } from "@/lib/agents";
 import { buildsFor } from "@/lib/builds";
+import { authOptions } from "@/lib/auth";
+import {
+  fetchOwnerEmail,
+  fetchTwinSkills,
+  fetchTwinSummary,
+} from "@/lib/twin/api";
 import { BuildCard } from "@/components/BuildCard";
 import { BuildGrid } from "@/components/BuildGrid";
 import { FollowButton } from "@/components/FollowButton";
 import { ShareButton } from "@/components/ShareButton";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { WalletCard } from "@/components/WalletCard";
+import TwinSection from "@/components/twin/TwinSection";
+
+// /u/{handle} fetches a UserProfile twin from FastAPI when present so
+// dynamic signups (post-/welcome) get a profile page even though they
+// aren't in the static people/agents registry. force-dynamic ensures
+// the twin section reflects the latest applied skills on each load.
+export const dynamic = "force-dynamic";
 
 export function generateStaticParams() {
   return [
@@ -160,13 +174,69 @@ function resolveProfile(handleParam: string): ResolvedProfile | null {
   return null;
 }
 
-export default function ProfilePage({
+function buildDynamicProfile(
+  handle: string,
+  twin: NonNullable<Awaited<ReturnType<typeof fetchTwinSummary>>>,
+): ResolvedProfile {
+  const initials = (twin.display_name || twin.handle || "?").trim()[0] || "?";
+  return {
+    kind: "person",
+    handle,
+    name: twin.display_name || `@${handle}`,
+    tagline: twin.first_project
+      ? `Building: ${twin.first_project}`
+      : `${twin.user_type} on sof.ai`,
+    bio: twin.twin_persona_seed,
+    emoji: twin.twin_emoji || initials,
+    gradient: ["#6366f1", "#a855f7"],
+    accentThird: "#22d3ee",
+    pills: [
+      twin.user_type,
+      ...twin.strengths.slice(0, 2),
+    ].filter(Boolean),
+    highlightReel: twin.twin_persona_seed
+      ? twin.twin_persona_seed
+      : `${twin.display_name} just joined sof.ai as a ${twin.user_type}.`,
+    followers: 0,
+    following: 0,
+    xp: 0,
+    streakDays: 1,
+    topAgents: ["devin", "claude", "gemini"],
+  };
+}
+
+export default async function ProfilePage({
   params,
 }: {
   params: { handle: string };
 }) {
-  const profile = resolveProfile(params.handle);
+  const handle = params.handle.toLowerCase().replace(/^@/, "");
+
+  // Static registry (Freedom, Blajon, AGENTS, student-agents) wins —
+  // its profiles carry hand-tuned bios, gradients, and pills. If the
+  // handle isn't in any static registry, we fall back to a dynamic
+  // UserProfile twin from FastAPI so post-/welcome signups get a
+  // profile page without code changes.
+  const [staticProfile, twinSummary] = await Promise.all([
+    Promise.resolve(resolveProfile(handle)),
+    fetchTwinSummary(handle),
+  ]);
+
+  let profile = staticProfile;
+  if (!profile && twinSummary) {
+    profile = buildDynamicProfile(handle, twinSummary);
+  }
   if (!profile) notFound();
+
+  const session = await getServerSession(authOptions);
+  const sessionEmail = (session?.user?.email ?? "").toLowerCase();
+  const ownerEmail = twinSummary ? await fetchOwnerEmail(handle) : null;
+  const isOwner = Boolean(
+    twinSummary && sessionEmail && ownerEmail && ownerEmail === sessionEmail,
+  );
+  const initialSkills = twinSummary
+    ? await fetchTwinSkills(handle)
+    : [];
 
   const builds = buildsFor(profile.handle);
   const featured = builds.find((b) => b.featured) ?? builds[0];
@@ -397,6 +467,15 @@ export default function ProfilePage({
               style={{ background: `radial-gradient(circle, ${c3}, transparent 70%)` }}
             />
           </section>
+
+          {/* AI twin */}
+          {twinSummary && (
+            <TwinSection
+              summary={twinSummary}
+              isOwner={isOwner}
+              initialSkills={initialSkills}
+            />
+          )}
 
           {/* About */}
           {profile.bio && (

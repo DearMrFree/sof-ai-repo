@@ -876,3 +876,37 @@ class UserProfile(SQLModel, table=True):
         default_factory=_utcnow, sa_column_kwargs={"server_default": text("CURRENT_TIMESTAMP")}
     )
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class TwinSkill(SQLModel, table=True):
+    """A skill the profile owner has trained into their digital twin.
+
+    Mirrors ``EmbedMentorNote`` (PR #34/#35) but FK'd to ``UserProfile``
+    rather than tied to an embedded agent slug. The same review chain
+    (Claude → Devin → Gemini) auto-vets each proposed skill before it
+    is folded into the twin's persona — keeping training fast (Devin
+    co-work loop) but safe (no proposed text becomes part of the twin
+    until all three reviewers approve).
+
+    Status semantics:
+      ``pending``   — owner proposed; review chain hasn't started.
+      ``reviewing`` — at least one round complete, more to go.
+      ``applied``   — all reviewers approved; skill is folded into the
+                      twin's persona via ``GET /twins/.../skills/active``.
+      ``rejected``  — at least one reviewer rejected.
+      ``retracted`` — owner withdrew the skill after it was applied.
+
+    Only the profile owner (matched by email) can propose or retract.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_profile_id: int = Field(foreign_key="userprofile.id", index=True)
+    proposed_by_email: str = Field(index=True, max_length=200)
+    proposed_at: datetime = Field(default_factory=_utcnow, index=True)
+    status: str = Field(default="pending", index=True, max_length=16)
+    title: str = Field(default="", max_length=120)
+    proposed_text: str = Field(max_length=2000)
+    applied_text: str = Field(default="", max_length=2000)
+    applied_at: Optional[datetime] = Field(default=None, index=True)
+    reviewer_chain_json: str = Field(default="[]")
+    rejection_reason: str = Field(default="", max_length=600)
