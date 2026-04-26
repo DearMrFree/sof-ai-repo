@@ -680,6 +680,66 @@ class EmbedConversation(SQLModel, table=True):
     status: str = Field(default="active", index=True)
 
 
+class EmbedInsight(SQLModel, table=True):
+    """A single classified insight extracted from one EmbedConversation.
+
+    The second piece of the LuxAI1 → sof.ai feedback loop. The
+    persistence layer (PR #30) captures the raw signal — what visitors
+    actually say to LuxAI1 on https://ai1.llc. This table captures the
+    *interpretation* of that signal: a daily classifier (Devin running
+    Claude) reads each closed conversation and labels it as one of:
+
+      - ``missed_lead``      : visitor showed buying intent but the
+        conversation ended without ``submit_lead`` firing — the
+        capability gap that costs Blajon revenue.
+      - ``capability_gap``   : visitor asked about something LuxAI1
+        couldn't answer well (a service tier, a geography, a pricing
+        nuance). Becomes the seed for a Blajon-proposed capability in
+        PR #32.
+      - ``off_brand``        : LuxAI1 said something that doesn't
+        match the AI1 voice (too casual, over-promised, leaked an
+        internal detail). Surfaces voice drift early.
+      - ``great_save``       : LuxAI1 handled a tricky thread
+        (multiple services, scheduling juggling, hesitant visitor)
+        without dropping it. Surfaces what to *keep* doing as the
+        agent trains.
+
+    Identity is ``conversation_id`` — exactly one insight row per
+    conversation. Re-classification (after a model upgrade or a prompt
+    revision) replaces the row in-place so the trainer console never
+    shows two competing labels for the same chat.
+
+    ``signal_score`` is a 0.0–1.0 importance weight assigned by the
+    classifier. Insights are surfaced to Blajon ranked by this score
+    so the most actionable rows float to the top of his backlog.
+    ``suggested_capability`` is an optional free-text proposal — the
+    classifier's best guess at what training-context delta would have
+    handled the conversation better. Blajon refines and approves it
+    in the trainer console; it's never auto-applied from here.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            name="uq_embed_insight_conversation",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: int = Field(index=True)
+    agent_slug: str = Field(index=True, max_length=64)
+    classified_at: datetime = Field(default_factory=_utcnow, index=True)
+    classifier_model: str = Field(default="", max_length=64)
+    insight_type: str = Field(
+        index=True,
+        max_length=32,
+    )
+    summary: str = Field(default="", max_length=600)
+    signal_score: float = Field(default=0.0, index=True)
+    suggested_capability: Optional[str] = Field(default=None, max_length=600)
+    reasoning: str = Field(default="", max_length=2000)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 

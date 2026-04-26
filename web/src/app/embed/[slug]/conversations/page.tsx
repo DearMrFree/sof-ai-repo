@@ -11,7 +11,13 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
-import { Inbox, MessageSquare, CheckCircle2, AlertTriangle } from "lucide-react";
+import {
+  Inbox,
+  MessageSquare,
+  CheckCircle2,
+  AlertTriangle,
+  Sparkles,
+} from "lucide-react";
 
 import { authOptions } from "@/lib/auth";
 import { canViewAgent, ownerEmailFor } from "@/lib/embed/conversations";
@@ -155,6 +161,13 @@ export default async function ConversationsListPage(props: {
               </strong>{" "}
               leads delivered
             </span>
+            <Link
+              href={`/embed/${slug}/insights`}
+              className="inline-flex items-center gap-1.5 text-violet-700 hover:text-violet-900 underline-offset-4 hover:underline"
+            >
+              <Sparkles className="h-4 w-4" />
+              View classified insights →
+            </Link>
           </div>
         )}
       </div>
