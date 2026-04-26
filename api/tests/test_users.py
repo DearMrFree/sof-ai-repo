@@ -192,6 +192,54 @@ def test_admin_recent_requires_internal_auth() -> None:
     assert res.status_code in (401, 403)
 
 
+def test_search_escapes_like_wildcards() -> None:
+    """Regression for Devin Review #38 — the ``q`` search param was
+    interpolated into a LIKE pattern without escaping ``%``/``_``, so
+    searching for ``%`` matched every row and ``_`` matched any single
+    char. Confirm wildcards are now treated as literals."""
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(email="a@x.com", handle="ada", display_name="Ada"),
+    )
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(
+            email="b@x.com",
+            handle="bee",
+            display_name="Bee",
+            tagline="100% bug-free",
+        ),
+    )
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(
+            email="c@x.com",
+            handle="cee",
+            display_name="Cee",
+            tagline="snake_case lover",
+        ),
+    )
+
+    # Pre-fix: ``%`` would produce ``%%%`` and match all 3 rows.
+    res = client.get("/users?q=%25")  # %25 = URL-encoded %
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == 1, body
+    assert body["items"][0]["handle"] == "bee"
+
+    # Pre-fix: ``_`` would match any single character (and thus every
+    # tagline / handle that's non-empty). After fix only the literal
+    # underscore in "snake_case" matches.
+    res2 = client.get("/users?q=_")
+    assert res2.status_code == 200
+    body2 = res2.json()
+    assert body2["total"] == 1, body2
+    assert body2["items"][0]["handle"] == "cee"
+
+
 def test_handle_normalization_strips_non_ascii() -> None:
     """Regression for Devin Review #38 — Python's ``str.isalnum`` accepts
     Unicode alphanumerics, so ``café`` would silently round-trip if we
