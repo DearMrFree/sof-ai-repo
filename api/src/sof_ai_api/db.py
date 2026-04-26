@@ -29,6 +29,15 @@ _ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("journalarticle", "pipeline_phase", "VARCHAR"),
     ("journalarticle", "pipeline_started_at", "TIMESTAMP"),
     ("journalarticle", "pipeline_completed_at", "TIMESTAMP"),
+    # Phase 2c — 30-day auto-renewal cron (PR #21).
+    # ``agentapplication`` was created in PR #16 and exists in every
+    # deployed DB; ``create_all`` will not add these columns to it, so we
+    # do it explicitly here. Defaults are backwards-compatible: every
+    # existing row stays in ``member_status="pending"`` until the cron
+    # evaluates it.
+    ("agentapplication", "member_status", "VARCHAR DEFAULT 'pending'"),
+    ("agentapplication", "member_status_at", "TIMESTAMP"),
+    ("agentapplication", "member_status_reason", "VARCHAR DEFAULT ''"),
 )
 
 
