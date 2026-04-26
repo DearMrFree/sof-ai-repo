@@ -20,12 +20,44 @@ import {
   type SubmitLeadInput,
 } from "@/lib/embed/luxai1";
 import { notifyBlajon } from "@/lib/embed/lead-email";
+import {
+  ownerEmailFor,
+  shortHash,
+  upsertEmbedConversation,
+  type EmbedConversationCustomerMeta,
+  type EmbedTranscriptMessage,
+} from "@/lib/embed/conversations";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface ChatBody {
   messages: { role: "user" | "assistant"; content: string }[];
+  client_thread_id?: string;
+}
+
+/**
+ * Lightweight UUID v4 fallback when a client doesn't send a thread id
+ * (e.g. an old cached widget version). Newer widgets mint their own
+ * id and persist it alongside the thread so we always upsert into the
+ * same row, but the server-side fallback keeps every conversation
+ * landing in the training-data store regardless.
+ */
+function uuidV4(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function sanitizeThreadId(raw: string | undefined): string {
+  if (typeof raw !== "string") return uuidV4();
+  const trimmed = raw.trim();
+  // Allow UUID hyphens + alphanumerics, cap length at 64 (matches the
+  // FastAPI Pydantic constraint). Anything weirder gets replaced.
+  if (!/^[A-Za-z0-9_\-]{8,64}$/.test(trimmed)) return uuidV4();
+  return trimmed;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -118,6 +150,30 @@ export async function POST(
   const client = new Anthropic({ apiKey });
   const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
   const userAgent = req.headers.get("user-agent") ?? undefined;
+
+  // Stable per-conversation id so every upsert collapses into one row
+  // even if the visitor closes the panel and reopens days later.
+  const clientThreadId = sanitizeThreadId(body.client_thread_id);
+
+  // Customer meta: only signal that helps Blajon recognize repeat
+  // visitors and lets the insights pipeline group by referrer / source.
+  // We hash the IP so the row is non-PII even though the transcript
+  // itself contains contact details (which Blajon owns as the lead).
+  const forwardedFor = req.headers.get("x-forwarded-for") ?? "";
+  const visitorIp = forwardedFor.split(",")[0]?.trim() ?? "";
+  const referrer = req.headers.get("referer") ?? undefined;
+  const origin = req.headers.get("origin") ?? undefined;
+  const customerMeta: EmbedConversationCustomerMeta = {};
+  if (userAgent) customerMeta.ua = userAgent.slice(0, 300);
+  if (referrer) customerMeta.referrer = referrer.slice(0, 300);
+  if (origin) customerMeta.origin = origin.slice(0, 300);
+  if (visitorIp) {
+    try {
+      customerMeta.ip_hash = await shortHash(visitorIp);
+    } catch {
+      // Web Crypto unavailable in some edge runtimes — skip silently.
+    }
+  }
 
   /**
    * Tool-use loop.
@@ -235,6 +291,25 @@ export async function POST(
     const detail = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console
     console.error("[embed/luxai1/chat] anthropic_error", { detail });
+    // Persist the conversation even on model error — the visitor's
+    // turn(s) and any lead that already fired are real signal that
+    // Blajon and the insights pipeline want to see.
+    const errorReply = leadSubmitted
+      ? "Got your details — Blajon's team will be in touch soon. (My follow-up reply hit a snag, but your request is in.)"
+      : "Sorry — I'm having trouble thinking right now. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.";
+    const errorTranscript: EmbedTranscriptMessage[] = [
+      ...body.messages.map((m) => ({ role: m.role, content: m.content })),
+      { role: "assistant" as const, content: errorReply },
+    ];
+    await upsertEmbedConversation({
+      agent_slug: slug,
+      client_thread_id: clientThreadId,
+      owner_email: ownerEmailFor(slug),
+      transcript: errorTranscript,
+      customer_meta: customerMeta,
+      lead_submitted: leadSubmitted,
+      lead_error: leadError ?? `model_error: ${detail.slice(0, 300)}`,
+    });
     // Preserve `leadSubmitted` from any earlier successful tool hop —
     // the email to Blajon already went out, so the widget must show
     // its "sent" pill even though the *follow-up* model turn failed.
@@ -243,11 +318,10 @@ export async function POST(
     return jsonResponse(
       {
         error: "model_error",
-        reply: leadSubmitted
-          ? "Got your details — Blajon's team will be in touch soon. (My follow-up reply hit a snag, but your request is in.)"
-          : "Sorry — I'm having trouble thinking right now. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.",
+        reply: errorReply,
         lead_submitted: leadSubmitted,
         lead_error: leadError,
+        client_thread_id: clientThreadId,
       },
       { status: 502 },
     );
@@ -258,9 +332,31 @@ export async function POST(
       "Sorry — I had trouble responding. Please call (408) 872-8340 and Blajon's team will help directly.";
   }
 
+  // Persist the conversation as training data. Done after we've already
+  // built the user-facing reply so a slow FastAPI doesn't block the
+  // visitor; bounded by a 2.5s timeout inside upsertEmbedConversation.
+  // Failures are logged but never surfaced to the widget.
+  const persistedTranscript: EmbedTranscriptMessage[] = [
+    ...body.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    })),
+    { role: "assistant" as const, content: finalText },
+  ];
+  await upsertEmbedConversation({
+    agent_slug: slug,
+    client_thread_id: clientThreadId,
+    owner_email: ownerEmailFor(slug),
+    transcript: persistedTranscript,
+    customer_meta: customerMeta,
+    lead_submitted: leadSubmitted,
+    lead_error: leadError,
+  });
+
   return jsonResponse({
     reply: finalText,
     lead_submitted: leadSubmitted,
     lead_error: leadError,
+    client_thread_id: clientThreadId,
   });
 }

@@ -626,6 +626,60 @@ class StudentProfessor(SQLModel, table=True):
     added_at: datetime = Field(default_factory=_utcnow)
 
 
+class EmbedConversation(SQLModel, table=True):
+    """A conversation between a website visitor and an embedded sof.ai agent.
+
+    The substrate of the LuxAI1 → sof.ai feedback loop: every chat on
+    https://ai1.llc lands here so Blajon can review what his concierge
+    is saying, the Insights pipeline can classify capability gaps and
+    missed leads, and Devin can co-author capability proposals back
+    into the agent's living training context.
+
+    Identity is ``(agent_slug, client_thread_id)``. The widget mints a
+    ``client_thread_id`` (UUID v4) on the visitor's first message and
+    persists it alongside the thread in localStorage so subsequent
+    upserts from the same browser idempotently replace the same row —
+    we never want two rows for one conversation, even if the visitor
+    closes the panel and reopens it days later.
+
+    ``transcript_json`` stores the full ordered list of
+    ``{role, content}`` messages (no PII masking — Blajon owns the
+    lead and the customer initiated contact). ``customer_meta_json``
+    holds non-PII signal — user agent, an IP hash for rate-limit
+    audit, the referrer URL — and stays small (<2KB).
+
+    ``status`` lifecycle:
+      - ``active``: visitor still typing or just paused; the row may
+        receive more upserts.
+      - ``converted``: ``submit_lead`` fired and Blajon was emailed
+        successfully (``lead_resend_message_id`` set).
+      - ``abandoned``: the cron flips active rows >24h with zero
+        leads to abandoned, freeing them for offline insights work.
+    """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "agent_slug",
+            "client_thread_id",
+            name="uq_embed_conversation_thread",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    agent_slug: str = Field(index=True, max_length=64)
+    client_thread_id: str = Field(index=True, max_length=64)
+    owner_email: str = Field(index=True, max_length=200)
+    started_at: datetime = Field(default_factory=_utcnow)
+    last_turn_at: datetime = Field(default_factory=_utcnow, index=True)
+    turn_count: int = Field(default=0)
+    lead_submitted: bool = Field(default=False, index=True)
+    lead_resend_message_id: Optional[str] = Field(default=None, max_length=128)
+    lead_error: Optional[str] = Field(default=None, max_length=500)
+    customer_meta_json: str = Field(default="{}")
+    transcript_json: str = Field(default="[]")
+    status: str = Field(default="active", index=True)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 
