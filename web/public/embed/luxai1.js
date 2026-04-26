@@ -45,8 +45,50 @@
   var CHAT_URL = API_BASE + "/api/embed/luxai1/chat";
 
   var STORAGE_KEY = "luxai1.thread.v1";
+  var THREAD_ID_KEY = "luxai1.thread_id.v1";
   var GREETING =
     "Hi! I'm LuxAI1, AI1 Bay Area's concierge. How can I help — moving, landscaping, hauling, or something else?";
+
+  // ---------- Thread id ----------
+  // Stable id per visitor-conversation. The server upserts the
+  // training-data row by (slug, thread_id), so reusing the same id
+  // across page reloads keeps the conversation in one row instead
+  // of fragmenting it. Cleared by "Start over" so the next chat is a
+  // distinct training-data row.
+  function uuidV4() {
+    if (
+      window.crypto &&
+      typeof window.crypto.randomUUID === "function"
+    ) {
+      try {
+        return window.crypto.randomUUID();
+      } catch (e) {}
+    }
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (
+      c,
+    ) {
+      var r = (Math.random() * 16) | 0;
+      var v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+  function loadThreadId() {
+    try {
+      var existing = window.localStorage.getItem(THREAD_ID_KEY);
+      if (existing && /^[A-Za-z0-9_\-]{8,64}$/.test(existing)) return existing;
+    } catch (e) {}
+    var fresh = uuidV4();
+    try {
+      window.localStorage.setItem(THREAD_ID_KEY, fresh);
+    } catch (e) {}
+    return fresh;
+  }
+  function clearThreadId() {
+    try {
+      window.localStorage.removeItem(THREAD_ID_KEY);
+    } catch (e) {}
+  }
+  var threadId = loadThreadId();
 
   // ---------- Storage ----------
   function loadThread() {
@@ -222,6 +264,8 @@
     if (pending) return;
     thread = [];
     clearThread();
+    clearThreadId();
+    threadId = loadThreadId();
     renderThread();
   });
 
@@ -252,7 +296,7 @@
     fetch(CHAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: thread }),
+      body: JSON.stringify({ messages: thread, client_thread_id: threadId }),
     })
       .then(function (res) {
         return res

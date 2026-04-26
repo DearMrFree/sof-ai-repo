@@ -9,6 +9,7 @@ from .routes import (
     articles,
     challenges,
     devin,
+    embed,
     enrollments,
     health,
     journals,
@@ -61,6 +62,7 @@ app.include_router(journals.router)
 app.include_router(articles.router)
 app.include_router(applications.router)
 app.include_router(enrollments.router)
+app.include_router(embed.router)
 
 
 @app.get("/")
