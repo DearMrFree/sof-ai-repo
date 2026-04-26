@@ -41,6 +41,10 @@ _ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # Trainer co-work (PR #34). ``embedmentornote`` is created fresh on
     # this deploy via ``create_all``, so no ALTER COLUMN entries here —
     # see ``_ADDITIVE_UNIQUE_INDEXES`` below for the supporting indexes.
+    # Cross-journal "Inspire from URL" (Agentic Teaching launch).
+    # ``journalarticle`` exists on every deployed DB so create_all will
+    # not add this column; backfilled rows stay NULL (no source URL).
+    ("journalarticle", "source_url", "VARCHAR"),
 )
 
 

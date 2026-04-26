@@ -134,6 +134,10 @@ class ArticleIn(BaseModel):
     submitter_type: OwnerType = "user"
     submitter_id: str = Field(..., min_length=1, max_length=80)
     coauthors: list[str] = Field(default_factory=list, max_length=40)
+    # Optional URL the author used as inspiration via the cross-journal
+    # "Inspire from URL" flow. Persisted for provenance so reviewers can
+    # always compare the published article against its starting point.
+    source_url: Optional[str] = Field(default=None, max_length=2000)
 
 
 class ArticleOut(BaseModel):
@@ -149,6 +153,7 @@ class ArticleOut(BaseModel):
     published_issue_id: Optional[int]
     submitted_at: str
     published_at: Optional[str]
+    source_url: Optional[str] = None
 
 
 class PeerReviewIn(BaseModel):
@@ -231,6 +236,7 @@ def _serialize_article(a: JournalArticle) -> ArticleOut:
         published_issue_id=a.published_issue_id,
         submitted_at=a.submitted_at.isoformat(),
         published_at=a.published_at.isoformat() if a.published_at else None,
+        source_url=a.source_url,
     )
 
 
@@ -359,6 +365,7 @@ def submit_article(
         submitter_id=body.submitter_id,
         coauthors=coauthors,
         status="submitted",
+        source_url=(body.source_url or "").strip() or None,
     )
     session.add(a)
     session.flush()  # need a.id for the correlation_id

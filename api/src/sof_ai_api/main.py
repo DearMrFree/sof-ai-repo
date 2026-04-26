@@ -18,6 +18,7 @@ from .routes import (
     users,
     wallet,
 )
+from .seed_journal_agentic_teaching import seed as seed_journal_agentic_teaching
 from .seed_journal_ai import seed as seed_journal_ai
 from .settings import settings
 
@@ -25,18 +26,23 @@ from .settings import settings
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    # Seed Journal AI's founding article on every startup. The function is
-    # idempotent — every insert is guarded by an existence check — so warm
-    # restarts are cheap no-ops. Wrapped in a try/except so a seed failure
-    # never blocks the application from coming up.
-    try:
-        with next(get_session()) as session:
-            seed_journal_ai(session)
-    except Exception:
-        # Don't die on startup if the seed can't land (e.g. DB migration
-        # pending, missing column). The journal can always be seeded later
-        # via the POST /journals/_seed/journal-ai endpoint.
-        pass
+    # Seed founding articles for every well-known journal on every
+    # startup. Each seed is idempotent — every insert is guarded by an
+    # existence check — so warm restarts are cheap no-ops. Each is
+    # wrapped in its own try/except so one seed failing (e.g. a pending
+    # additive migration) never blocks the application from coming up
+    # and never blocks a *sibling* journal's seed from running.
+    for _seed_fn, _label in (
+        (seed_journal_ai, "journal-ai"),
+        (seed_journal_agentic_teaching, "agentic-teaching"),
+    ):
+        try:
+            with next(get_session()) as session:
+                _seed_fn(session)
+        except Exception:
+            # Don't die on startup if the seed can't land. The journal
+            # can always be seeded later via POST /journals/_seed/{slug}.
+            pass
     yield
 
 
