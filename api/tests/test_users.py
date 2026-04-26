@@ -276,3 +276,72 @@ def test_goals_strengths_are_capped_and_round_tripped() -> None:
     # Server caps at 20 to keep the list-encoded JSON column bounded.
     assert len(body["goals"]) == 20
     assert len(body["strengths"]) == 20
+
+
+def test_signup_publishes_to_broker_with_public_payload() -> None:
+    """Adversarial: a POST /users/onboarding must enqueue an SSE-formatted
+    frame on the broker's subscriber queue with event=``profile.created``
+    and a payload containing the handle but NOT the email.
+
+    A regression where the upsert handler stops calling the broker would
+    leave the queue empty (count==0); a regression where the payload
+    leaks email would fail the ``email not in body`` assertion.
+    """
+    import asyncio as _asyncio
+    import json as _json
+
+    from sof_ai_api.routes._signups_broker import broker
+
+    async def _drive() -> tuple[list[str], list[dict[str, object]]]:
+        # Subscribe FIRST so the broker captures the running loop and
+        # adds our queue before the publish lands.
+        q = await broker.subscribe()
+        try:
+            # Run the sync TestClient call on a worker thread (mirrors how
+            # FastAPI runs sync request handlers IRL — the publish then
+            # round-trips back via run_coroutine_threadsafe).
+            await _asyncio.to_thread(
+                lambda: client.post(
+                    "/users/onboarding", headers=AUTH, json=_payload()
+                )
+            )
+            await _asyncio.to_thread(
+                lambda: client.post(
+                    "/users/onboarding",
+                    headers=AUTH,
+                    json=_payload(tagline="updated"),
+                )
+            )
+            frames: list[str] = []
+            for _ in range(2):
+                frame = await _asyncio.wait_for(q.get(), timeout=3.0)
+                frames.append(frame)
+            payloads: list[dict[str, object]] = []
+            event_names: list[str] = []
+            for f in frames:
+                # frame format: "event: <name>\ndata: <json>\n\n"
+                lines = f.strip().split("\n")
+                event_names.append(lines[0].removeprefix("event: ").strip())
+                data = lines[1].removeprefix("data: ")
+                payloads.append(_json.loads(data))
+            return event_names, payloads
+        finally:
+            await broker.unsubscribe(q)
+
+    event_names, payloads = _asyncio.run(_drive())
+    assert event_names == ["profile.created", "profile.updated"], event_names
+    assert all(p.get("handle") == "ada" for p in payloads), payloads
+    # Email is deliberately stripped from the public SSE payload.
+    assert all("email" not in p for p in payloads), payloads
+
+
+def test_admin_stream_requires_internal_auth() -> None:
+    """Without the auth header OR ``?auth=`` query, the stream 401s.
+
+    Adversarial: the gate has both a header path and a query-string
+    path; we hit the endpoint with neither and expect 401.
+    """
+    # Use a streaming GET so FastAPI doesn't try to read the whole body
+    # before honoring the HTTPException raised at handler entry.
+    with client.stream("GET", "/users/admin/stream") as r:
+        assert r.status_code == 401
