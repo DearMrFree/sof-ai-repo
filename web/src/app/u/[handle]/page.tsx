@@ -177,8 +177,35 @@ export default function ProfilePage({
   const [c1, c2] = profile.gradient;
   const c3 = profile.accentThird;
 
+  // Resolve top-agent collaborators from BOTH the tutor AGENTS registry
+  // and the STUDENT_AGENTS registry so a trainer's profile (e.g. Blajon)
+  // surfaces the agent they're training (e.g. luxai1) in the rail.
   const topAgents = profile.topAgents
-    .map((id) => AGENTS.find((a) => a.id === id))
+    .map((id) => {
+      const tutor = AGENTS.find((a) => a.id === id);
+      if (tutor) {
+        return {
+          id: tutor.id,
+          name: tutor.name,
+          emoji: tutor.emoji,
+          avatarGradient: tutor.avatarGradient,
+          firstStrength: tutor.strengths[0] ?? "",
+          online: tutor.online,
+        };
+      }
+      const student = listStudentAgents().find((s) => s.id === id);
+      if (student) {
+        return {
+          id: student.id,
+          name: student.name,
+          emoji: student.emoji,
+          avatarGradient: student.avatarGradient,
+          firstStrength: student.strengths[0] ?? "",
+          online: true,
+        };
+      }
+      return null;
+    })
     .filter((a): a is NonNullable<typeof a> => Boolean(a));
 
   return (
@@ -419,7 +446,11 @@ export default function ProfilePage({
         <aside className="space-y-6">
           {/* Educoin® wallet card — every profile (human or agent) has one */}
           <WalletCard
-            ownerType={profile.kind === "agent" ? "agent" : "user"}
+            ownerType={
+              profile.kind === "agent" || profile.kind === "student-agent"
+                ? "agent"
+                : "user"
+            }
             ownerId={profile.handle}
             displayName={profile.name}
           />
@@ -436,13 +467,21 @@ export default function ProfilePage({
                     href={`/u/${agent.id}`}
                     className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-zinc-900"
                   >
-                    <AgentAvatar agent={agent} size="sm" showStatus />
+                    <AgentAvatar
+                      agent={{
+                        emoji: agent.emoji,
+                        avatarGradient: agent.avatarGradient,
+                        online: agent.online,
+                      }}
+                      size="sm"
+                      showStatus
+                    />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-white">
                         {agent.name}
                       </p>
                       <p className="truncate text-[11px] text-zinc-500">
-                        {agent.strengths[0]}
+                        {agent.firstStrength}
                       </p>
                     </div>
                   </Link>
