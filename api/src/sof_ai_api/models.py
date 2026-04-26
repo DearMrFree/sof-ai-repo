@@ -822,3 +822,57 @@ class DevinCapstoneAttempt(SQLModel, table=True):
     prompt: str
     is_stub: bool = False
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class UserProfile(SQLModel, table=True):
+    """A signed-up human's profile + onboarding answers.
+
+    Created when a visitor completes the ``/welcome`` wizard. The handle is
+    auto-derived from email but editable; ``user_type`` drives the searchable
+    filter on ``/u`` and the admin dashboard's per-type live counts.
+
+    The "AI twin" lives here too — every UserProfile spawns one digital
+    twin keyed to ``twin_handle`` and seeded from ``goals_json`` /
+    ``strengths_json`` / ``first_project``. The trainer co-work loop
+    (existing ``EmbedMentorNote`` machinery) is reused to evolve the
+    twin's system prompt over time.
+
+    Optional ``devin_session_url`` pins the user's primary Devin session
+    (e.g. Freedom's "Build AI LMS"); the profile renders a "Continue in
+    Devin" CTA. Devin usage is on the user's own account — sof.ai never
+    proxies their key — so we just store the URL.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_user_profile_email"),
+        UniqueConstraint("handle", name="uq_user_profile_handle"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(max_length=200, index=True)
+    handle: str = Field(max_length=64, index=True)
+    display_name: str = Field(max_length=200)
+    # One of: "student" | "educator" | "corporation" | "administrator"
+    # | "researcher" | "founder". Drives ``/u?type=`` filtering and the
+    # admin dashboard buckets. Stored as free string so we can add new
+    # types later without a migration.
+    user_type: str = Field(max_length=32, index=True)
+    tagline: str = Field(default="", max_length=300)
+    location: str = Field(default="", max_length=200)
+    # JSON-encoded lists. Kept as text to avoid a JSON column requirement
+    # on SQLite. Read sites parse with ``json.loads``.
+    goals_json: str = Field(default="[]")
+    strengths_json: str = Field(default="[]")
+    first_project: str = Field(default="", max_length=500)
+    # AI twin seeded at signup. Persona is editable later via the trainer
+    # co-work loop; this is the seed only.
+    twin_name: str = Field(default="", max_length=80)
+    twin_emoji: str = Field(default="🤖", max_length=8)
+    twin_persona_seed: str = Field(default="")
+    # Optional. Stored when the user pastes a Devin session URL so their
+    # profile shows "Continue in Devin →".
+    devin_session_url: str = Field(default="", max_length=500)
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column_kwargs={"server_default": text("CURRENT_TIMESTAMP")}
+    )
+    updated_at: datetime = Field(default_factory=_utcnow)

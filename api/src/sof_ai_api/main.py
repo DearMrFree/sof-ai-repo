@@ -14,6 +14,7 @@ from .routes import (
     health,
     journals,
     progress,
+    users,
     wallet,
 )
 from .seed_journal_ai import seed as seed_journal_ai
@@ -63,6 +64,7 @@ app.include_router(articles.router)
 app.include_router(applications.router)
 app.include_router(enrollments.router)
 app.include_router(embed.router)
+app.include_router(users.router)
 
 
 @app.get("/")
