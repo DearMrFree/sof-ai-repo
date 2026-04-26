@@ -54,10 +54,7 @@ export async function POST(
       method: "POST",
       headers: internalHeaders(),
       cache: "no-store",
-      body: JSON.stringify({
-        proposed_by_email: email,
-        proposed_text: "",
-      }),
+      body: JSON.stringify({ proposed_by_email: email }),
     },
   );
   return new NextResponse(await res.text(), {

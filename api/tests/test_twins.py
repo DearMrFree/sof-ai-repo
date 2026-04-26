@@ -213,7 +213,7 @@ def test_retract_owner_only_and_drops_from_lists() -> None:
     # Imposter retract → 403
     r403 = client.post(
         f"/twins/skills/{p['id']}/retract",
-        json={"proposed_by_email": "imposter@example.com", "proposed_text": "x"},
+        json={"proposed_by_email": "imposter@example.com"},
         headers=AUTH,
     )
     assert r403.status_code == 403
@@ -221,7 +221,7 @@ def test_retract_owner_only_and_drops_from_lists() -> None:
     # Owner retract → 200, status retracted
     r200 = client.post(
         f"/twins/skills/{p['id']}/retract",
-        json={"proposed_by_email": "ada@example.com", "proposed_text": "x"},
+        json={"proposed_by_email": "ada@example.com"},
         headers=AUTH,
     )
     assert r200.status_code == 200
@@ -264,6 +264,37 @@ def test_summary_does_not_leak_owner_email() -> None:
     assert "proposed_by_email" not in {
         k for k in summary if k == "proposed_by_email"
     }
+
+
+def test_retract_accepts_body_with_only_email() -> None:
+    """Regression for PR #42 → PR-TWIN-FIX (Devin Review).
+
+    The retract route originally reused ``ProposeSkillIn`` which
+    enforces ``proposed_text`` ``min_length=1``. The Web retract caller
+    has no proposed text to send, so it sent ``""`` and Pydantic
+    rejected every request with HTTP 422 before the handler ran. After
+    splitting out ``RetractSkillIn`` the route accepts a body with
+    only ``proposed_by_email`` — which is exactly what the Web caller
+    sends. This test exercises that shape directly so a regression
+    that re-couples the schemas would fail loudly.
+    """
+    _seed_profile()
+    p = client.post(
+        "/twins/by-handle/ada/skills",
+        json={
+            "proposed_by_email": "ada@example.com",
+            "title": "X",
+            "proposed_text": "x" * 5,
+        },
+        headers=AUTH,
+    ).json()
+    res = client.post(
+        f"/twins/skills/{p['id']}/retract",
+        json={"proposed_by_email": "ada@example.com"},
+        headers=AUTH,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "retracted"
 
 
 def test_finalize_after_terminal_returns_409() -> None:
