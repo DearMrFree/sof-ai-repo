@@ -454,32 +454,12 @@ async def admin_signup_stream(
             raise HTTPException(status_code=401, detail="unauthorized")
 
     async def event_generator():
-        # Open the channel.
         yield ":connected\n\n"
         async with subscription() as q:
-            heartbeat_task = asyncio.create_task(_sleep_seconds(15.0))
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    get_task = asyncio.create_task(q.get())
-                    done, _pending = await asyncio.wait(
-                        {get_task, heartbeat_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                        timeout=None,
-                    )
-                    if heartbeat_task in done:
-                        # Reset heartbeat clock.
-                        heartbeat_task = asyncio.create_task(_sleep_seconds(15.0))
-                        if get_task not in done:
-                            get_task.cancel()
-                        yield ":hb\n\n"
-                        continue
-                    if get_task in done:
-                        frame = get_task.result()
-                        yield frame
-            finally:
-                heartbeat_task.cancel()
+            async for chunk in _multiplex_queue_with_heartbeat(
+                q, request.is_disconnected, heartbeat_seconds=15.0
+            ):
+                yield chunk
 
     headers = {
         # Browsers will reconnect after 3s by default. Tell intermediaries
@@ -497,6 +477,50 @@ async def admin_signup_stream(
 
 async def _sleep_seconds(seconds: float) -> None:
     await asyncio.sleep(seconds)
+
+
+async def _multiplex_queue_with_heartbeat(
+    q: asyncio.Queue[str],
+    is_disconnected,
+    *,
+    heartbeat_seconds: float,
+):
+    """Yield frames from ``q`` interleaved with periodic ``:hb`` keep-alives.
+
+    Extracted from ``admin_signup_stream.event_generator`` so the
+    race-condition handling is independently testable. If both the
+    queue-get task and the heartbeat-sleep task complete in the same
+    ``asyncio.wait`` round (the queue message arrived right as the
+    heartbeat clock fired), we MUST still yield the dequeued frame —
+    ``q.get()`` has already consumed the item, so failing to yield it
+    would silently drop the SSE event. The fix below evaluates the two
+    tasks independently rather than treating them as mutually exclusive
+    branches.
+    """
+
+    heartbeat_task: asyncio.Task[None] = asyncio.create_task(
+        _sleep_seconds(heartbeat_seconds)
+    )
+    try:
+        while True:
+            if await is_disconnected():
+                return
+            get_task: asyncio.Task[str] = asyncio.create_task(q.get())
+            done, _pending = await asyncio.wait(
+                {get_task, heartbeat_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if get_task in done:
+                yield get_task.result()
+            else:
+                get_task.cancel()
+            if heartbeat_task in done:
+                heartbeat_task = asyncio.create_task(
+                    _sleep_seconds(heartbeat_seconds)
+                )
+                yield ":hb\n\n"
+    finally:
+        heartbeat_task.cancel()
 
 
 def _expected_internal_auth_token() -> str:
