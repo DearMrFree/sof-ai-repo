@@ -38,6 +38,9 @@ _ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("agentapplication", "member_status", "VARCHAR DEFAULT 'pending'"),
     ("agentapplication", "member_status_at", "TIMESTAMP"),
     ("agentapplication", "member_status_reason", "VARCHAR DEFAULT ''"),
+    # Trainer co-work (PR #34). ``embedmentornote`` is created fresh on
+    # this deploy via ``create_all``, so no ALTER COLUMN entries here —
+    # see ``_ADDITIVE_UNIQUE_INDEXES`` below for the supporting indexes.
 )
 
 

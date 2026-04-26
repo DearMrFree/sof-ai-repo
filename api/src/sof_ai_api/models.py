@@ -740,6 +740,72 @@ class EmbedInsight(SQLModel, table=True):
     reasoning: str = Field(default="", max_length=2000)
 
 
+class EmbedMentorNote(SQLModel, table=True):
+    """A trainer-proposed capability that, once auto-reviewed, folds into
+    the embedded agent's live system prompt.
+
+    The third leg of the LuxAI1 → sof.ai feedback loop:
+
+      1. Visitors chat with LuxAI1 on https://ai1.llc — every turn
+         persists to ``EmbedConversation`` (PR #30).
+      2. The daily classifier reads each closed conversation and
+         labels it ``capability_gap`` / ``missed_lead`` / etc. with a
+         ``suggested_capability`` proposal — landing here as
+         ``EmbedInsight`` (PR #32).
+      3. Blajon reviews the insights at ``/embed/luxai1/insights`` and
+         clicks "Propose capability" on a row — or types a free-form
+         proposal at ``/embed/luxai1/trainer``. Either way, a row
+         lands in this table at ``status="pending"``.
+      4. The Web app fans the proposed text through the existing
+         Living-Article review chain (Claude / Devin / Gemini). Each
+         round records its verdict here. If all three pass, the row
+         flips to ``status="applied"`` and ``applied_text`` is
+         injected into LuxAI1's system prompt at the next request.
+      5. ``buildSystemPrompt`` in ``web/src/lib/embed/luxai1.ts``
+         pulls active notes via ``GET /embed/{slug}/mentor-notes/active``
+         and concatenates them under a "Living trainer guidance"
+         section. Next-Cache revalidates every 5 minutes so a
+         freshly-applied note is live within that window — no
+         redeploy of either ai1.llc or sof.ai required.
+
+    Status semantics:
+      ``pending``   — Blajon proposed; review chain hasn't started.
+      ``reviewing`` — at least one round complete, more to go.
+      ``rejected``  — at least one reviewer voted block; never applies.
+      ``applied``   — all reviewers approved; folded into system prompt.
+      ``retracted`` — Blajon explicitly removed an applied note.
+
+    ``applied_text`` may differ from ``proposed_text`` because reviewers
+    can suggest a tightened phrasing (e.g. ``"Recognize 'piano' as
+    specialty_transport"`` may end up as ``"When a visitor mentions a
+    piano, classify the move under specialty_transport and quote a
+    minimum 2-mover crew."`` after Claude's edit). The trainer console
+    shows both so the trainer can see what shipped.
+
+    ``reviewer_chain_json`` is a JSON-serialized list of ``{reviewer_id,
+    verdict, summary, body}`` rounds — mirrors the
+    ``ArticleReviewRound`` shape from PR #10/PR #11 for visual parity
+    in the trainer UI.
+
+    ``source_insight_id`` is optional — set when the proposal originated
+    from a "Propose capability" click on the insights console; left
+    NULL for free-form proposals. Lets the trainer console highlight
+    "this note shipped because of conversation #3" provenance.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    agent_slug: str = Field(index=True, max_length=64)
+    proposed_by_email: str = Field(index=True, max_length=200)
+    proposed_at: datetime = Field(default_factory=_utcnow, index=True)
+    status: str = Field(default="pending", index=True, max_length=16)
+    proposed_text: str = Field(max_length=2000)
+    applied_text: str = Field(default="", max_length=2000)
+    applied_at: Optional[datetime] = Field(default=None, index=True)
+    reviewer_chain_json: str = Field(default="[]")
+    source_insight_id: Optional[int] = Field(default=None, index=True)
+    rejection_reason: str = Field(default="", max_length=600)
+
+
 class DevinCapstoneAttempt(SQLModel, table=True):
     """A record of a learner launching a Devin capstone session.
 
