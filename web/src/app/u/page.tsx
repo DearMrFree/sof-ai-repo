@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { GraduationCap, Sparkles } from "lucide-react";
 import { listPeople } from "@/lib/people";
-import { AGENTS } from "@/lib/agents";
+import { AGENTS, listStudentAgents } from "@/lib/agents";
 import { buildsFor, countByStatus } from "@/lib/builds";
 
 export const metadata = {
@@ -12,6 +12,7 @@ export const metadata = {
 
 export default function PeopleDirectoryPage() {
   const people = listPeople();
+  const studentAgents = listStudentAgents();
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
       <header className="mb-8">
@@ -79,6 +80,64 @@ export default function PeopleDirectoryPage() {
           })}
         </div>
       </section>
+
+      {studentAgents.length > 0 ? (
+        <section className="mb-12">
+          <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
+            <GraduationCap className="h-3.5 w-3.5 text-emerald-300" />
+            Student agents
+          </h2>
+          <p className="mb-4 max-w-2xl text-xs text-zinc-500">
+            Agents enrolled at sof.ai under a human trainer. Each one is
+            trained continuously by its owner via the trainer co-work loop —
+            new capabilities ship live to its embed host within minutes, no
+            redeploy.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {studentAgents.map((s) => (
+              <Link
+                key={s.id}
+                href={`/u/${s.id}`}
+                className="group overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 transition hover:border-emerald-500/40 hover:bg-zinc-900/70"
+              >
+                <div
+                  className="h-20"
+                  style={{
+                    backgroundImage: `radial-gradient(circle at 25% 25%, ${s.avatarGradient[0]}cc, transparent 55%), radial-gradient(circle at 75% 70%, ${s.avatarGradient[1]}cc, transparent 55%), #0f0f14`,
+                  }}
+                />
+                <div className="flex items-start gap-3 p-4">
+                  <div
+                    className="-mt-10 flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl text-2xl ring-4 ring-zinc-950"
+                    style={{
+                      backgroundImage: `linear-gradient(135deg, ${s.avatarGradient[0]}, ${s.avatarGradient[1]})`,
+                    }}
+                  >
+                    {s.emoji}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-white">
+                      {s.name}
+                    </p>
+                    <p className="truncate text-[11px] text-zinc-500">
+                      {s.handle} · trained by{" "}
+                      <span className="text-zinc-300">@{s.ownerHandle}</span>
+                    </p>
+                    <p className="mt-2 line-clamp-2 text-xs text-zinc-400">
+                      {s.tagline}
+                    </p>
+                    {s.embedHost ? (
+                      <p className="mt-3 text-[10px] text-emerald-400">
+                        Live at {s.embedHost}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">

@@ -255,3 +255,72 @@ export function findAgentWithCapability(
 ): Agent | undefined {
   return AGENTS.find((a) => agentHasCapability(a, capability));
 }
+
+/**
+ * Student agents — agents enrolled at sof.ai under a human trainer
+ * (e.g. LuxAI1 under Blajon). They are NOT classroom tutors; they have
+ * their own dynamic system prompt that lives next to their training
+ * substrate (e.g. ``web/src/lib/embed/luxai1.ts`` for LuxAI1) and are
+ * trained continuously through the trainer co-work loop.
+ *
+ * They appear on /u and have a /u/{handle} profile page so visitors can
+ * see who's training whom. They never appear in the classroom rail
+ * (``getOfficeHoursAgents``) — that's reserved for tutor agents.
+ */
+export interface StudentAgent {
+  id: string;
+  name: string;
+  /** Display handle including the leading "@". */
+  handle: string;
+  /** Slug of the human trainer/owner; matches ``Person.handle``. */
+  ownerHandle: string;
+  tagline: string;
+  bio: string;
+  /** Short skill chips rendered next to the name. */
+  strengths: string[];
+  emoji: string;
+  avatarGradient: [string, string];
+  /** Tailwind accent color name used for the rail card border + dot. */
+  accent: string;
+  /** Live host the agent serves visitors on (e.g. "ai1.llc"). */
+  embedHost?: string;
+  /** Trainer console href (relative to sof.ai). */
+  trainerConsoleHref?: string;
+  /** Insights console href (relative to sof.ai). */
+  insightsHref?: string;
+  /** ISO date the student enrolled at sof.ai. */
+  joined: string;
+}
+
+export const STUDENT_AGENTS: StudentAgent[] = [
+  {
+    id: "luxai1",
+    name: "LuxAI1",
+    handle: "@luxai1",
+    ownerHandle: "blajon",
+    tagline:
+      "Concierge for All In One (AI1) Bay Area. Trained at sof.ai by Blajon.",
+    bio: "LuxAI1 greets every visitor on ai1.llc — qualifying leads, booking estimates, and routing customers to Blajon. Every conversation persists back to sof.ai as training data; the daily classifier flags capability gaps; the trainer console folds approved capabilities into LuxAI1's live system prompt within minutes — no redeploy of ai1.llc required.",
+    strengths: [
+      "Lead qualification",
+      "Specialty transport intake",
+      "Always-on concierge",
+    ],
+    emoji: "🛎️",
+    avatarGradient: ["#0ea5e9", "#22d3ee"],
+    accent: "sky",
+    embedHost: "ai1.llc",
+    trainerConsoleHref: "/embed/luxai1/trainer",
+    insightsHref: "/embed/luxai1/insights",
+    joined: "2026-04-22",
+  },
+];
+
+export function getStudentAgent(handle: string): StudentAgent | undefined {
+  const h = handle.toLowerCase().replace(/^@/, "");
+  return STUDENT_AGENTS.find((a) => a.id === h);
+}
+
+export function listStudentAgents(): StudentAgent[] {
+  return STUDENT_AGENTS;
+}

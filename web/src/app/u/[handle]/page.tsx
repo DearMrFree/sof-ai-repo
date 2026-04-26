@@ -12,7 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { getPerson, listPeople } from "@/lib/people";
-import { AGENTS } from "@/lib/agents";
+import { AGENTS, getStudentAgent, listStudentAgents } from "@/lib/agents";
 import { buildsFor } from "@/lib/builds";
 import { BuildCard } from "@/components/BuildCard";
 import { BuildGrid } from "@/components/BuildGrid";
@@ -25,6 +25,7 @@ export function generateStaticParams() {
   return [
     ...listPeople().map((p) => ({ handle: p.handle })),
     ...AGENTS.map((a) => ({ handle: a.id })),
+    ...listStudentAgents().map((s) => ({ handle: s.id })),
   ];
 }
 
@@ -42,7 +43,7 @@ export async function generateMetadata({
 }
 
 interface ResolvedProfile {
-  kind: "person" | "agent";
+  kind: "person" | "agent" | "student-agent";
   handle: string; // without @
   name: string;
   tagline: string;
@@ -112,6 +113,48 @@ function resolveProfile(handleParam: string): ResolvedProfile | null {
         .slice(0, 3)
         .map((a) => a.id),
       agentId: agent.id,
+    };
+  }
+  const student = getStudentAgent(handle);
+  if (student) {
+    const links: { label: string; href: string }[] = [];
+    if (student.embedHost) {
+      links.push({
+        label: student.embedHost,
+        href: `https://${student.embedHost}`,
+      });
+    }
+    if (student.trainerConsoleHref) {
+      links.push({
+        label: "Trainer console",
+        href: student.trainerConsoleHref,
+      });
+    }
+    if (student.insightsHref) {
+      links.push({ label: "Insights", href: student.insightsHref });
+    }
+    return {
+      kind: "student-agent",
+      handle: student.id,
+      name: student.name,
+      tagline: student.tagline,
+      bio: student.bio,
+      emoji: student.emoji,
+      gradient: student.avatarGradient,
+      accentThird: "#22d3ee",
+      pills: [
+        `Trained by @${student.ownerHandle}`,
+        ...student.strengths.slice(0, 2),
+      ],
+      joined: student.joined,
+      highlightReel: `${student.name} is a sof.ai student agent owned and trained by @${student.ownerHandle}. ${student.embedHost ? `Live at ${student.embedHost}.` : ""} Every visitor turn becomes training data; new capabilities ship via the trainer co-work loop within minutes.`,
+      followers: 0,
+      following: 1,
+      xp: 0,
+      streakDays: 1,
+      topAgents: ["devin", "claude", "gemini"],
+      links: links.length ? links : undefined,
+      agentId: student.id,
     };
   }
   return null;

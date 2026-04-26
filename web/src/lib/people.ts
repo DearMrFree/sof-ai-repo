@@ -130,6 +130,40 @@ export const PEOPLE: Person[] = [
     streakDays: 12,
   },
   {
+    handle: "blajon",
+    name: "Blajon Lux",
+    tagline:
+      "Owner of All In One (AI1) Bay Area. Training LuxAI1 — the first human-with-AI student at sof.ai.",
+    bio: "Blajon runs AI1 — a Bay Area home-services business spanning luxury moving, landscaping, pressure washing, and specialty transport. He's the founding trainer of LuxAI1, the concierge agent that greets every visitor on ai1.llc and brings every conversation back to sof.ai for review. Believes the best teacher of an AI agent is the human whose business it represents.",
+    location: "Bay Area, CA",
+    role: "learner",
+    pills: ["LuxAI1 trainer", "AI1 Bay Area", "First-cohort student-trainer"],
+    emoji: "🛠️",
+    avatarGradient: ["#0ea5e9", "#22d3ee"],
+    accentThird: "#8b5cf6",
+    highlightReel:
+      "Co-trained LuxAI1 with Devin: every visitor conversation on ai1.llc becomes training data, the daily classifier flags capability gaps, and the trainer console at sof.ai turns those gaps into shipped capabilities within minutes — no redeploy on the live site.",
+    joined: "2026-04-22",
+    pronouns: "he/him",
+    topAgents: ["luxai1", "devin", "claude"],
+    followers: 12,
+    following: 4,
+    xp: 320,
+    streakDays: 4,
+    links: [
+      { label: "ai1.llc", href: "https://ai1.llc" },
+      { label: "lux.ai1.llc", href: "https://lux.ai1.llc" },
+      {
+        label: "Trainer console",
+        href: "/embed/luxai1/trainer",
+      },
+      {
+        label: "Insights",
+        href: "/embed/luxai1/insights",
+      },
+    ],
+  },
+  {
     handle: "you",
     name: "You",
     tagline: "Just joined. Here to learn, train, build.",
