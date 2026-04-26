@@ -19,6 +19,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..db import get_session
@@ -181,8 +182,32 @@ def create_enrollment(
             updated_at=now,
         )
         session.add(e)
-        session.commit()
-        session.refresh(e)
+        try:
+            session.commit()
+            session.refresh(e)
+        except IntegrityError:
+            # Another concurrent caller inserted the enrollment for this
+            # application_id between our SELECT and INSERT. Re-fetch their
+            # row and merge professors into it.
+            session.rollback()
+            if body.application_id is None:
+                # Shouldn't happen — only application_id has a unique
+                # constraint, and a None FK can't collide.
+                raise HTTPException(
+                    status_code=500,
+                    detail="enrollment insert race could not be reconciled",
+                ) from None
+            winner = session.exec(
+                select(StudentEnrollment).where(
+                    StudentEnrollment.application_id == body.application_id
+                )
+            ).first()
+            if winner is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="enrollment insert race could not be reconciled",
+                ) from None
+            e = winner
     else:
         e = existing
 
@@ -204,7 +229,13 @@ def create_enrollment(
             )
         )
         seen.add(key)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Concurrent caller already inserted some/all of these professor
+        # rows. The unique constraint did its job — re-load and serialize
+        # so the response reflects the converged state.
+        session.rollback()
 
     return _serialize_enrollment(e, _load_professors(session, e.id or 0))
 
@@ -310,7 +341,25 @@ def add_professor(
         added_at=_utcnow(),
     )
     session.add(p)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Concurrent caller won the race — re-fetch and return the
+        # winning row so this call still looks idempotent to the client.
+        session.rollback()
+        winner = session.exec(
+            select(StudentProfessor).where(
+                StudentProfessor.student_enrollment_id == enrollment_id,
+                StudentProfessor.professor_email == email,
+                StudentProfessor.role == body.role,
+            )
+        ).first()
+        if winner is None:
+            # Shouldn't happen — the IntegrityError implies a row exists.
+            raise HTTPException(
+                status_code=500, detail="professor upsert race could not be reconciled"
+            ) from None
+        return _serialize_professor(winner)
     session.refresh(p)
     e.updated_at = _utcnow()
     session.add(e)

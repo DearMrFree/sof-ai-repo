@@ -53,6 +53,24 @@ _ADDITIVE_UNIQUE_INDEXES: tuple[tuple[str, str], ...] = (
         "ON journalarticle (source_session_id) "
         "WHERE source_session_id IS NOT NULL",
     ),
+    # PR #23 follow-up: idempotency guards for the StudentEnrollment +
+    # StudentProfessor model. The tables were created on the prior deploy
+    # (so create_all will not re-create them with the constraints baked
+    # into __table_args__), and Devin Review caught real TOCTOU races in
+    # both create_enrollment and add_professor that the unique indexes
+    # close at the DB level. NULL application_id is allowed via partial
+    # predicate so out-of-band trio-invited enrollments don't collide.
+    (
+        "uq_student_enrollment_application_id",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_student_enrollment_application_id "
+        "ON studentenrollment (application_id) "
+        "WHERE application_id IS NOT NULL",
+    ),
+    (
+        "uq_student_professor_role",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_student_professor_role "
+        "ON studentprofessor (student_enrollment_id, professor_email, role)",
+    ),
 )
 
 
