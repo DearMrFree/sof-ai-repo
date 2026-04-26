@@ -18,7 +18,7 @@ import os
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from sof_ai_api.db import engine, init_db
 from sof_ai_api.main import app
@@ -258,7 +258,10 @@ def test_finalize_apply_succeeds_with_unanimous_approve() -> None:
             f"/embed/mentor-notes/{nid}/finalize",
             json={
                 "status": "applied",
-                "applied_text": "When a visitor mentions a piano, classify the move as specialty_transport.",
+                "applied_text": (
+                    "When a visitor mentions a piano, classify the"
+                    " move as specialty_transport."
+                ),
             },
             headers=AUTH,
         )
@@ -430,12 +433,10 @@ def test_active_endpoint_filters_to_applied_only_and_is_unauthed() -> None:
 def test_list_filters_by_status_and_tallies_full_set() -> None:
     # Reset state by counting the existing rows so this test isn't
     # coupled to absolute totals from prior tests in the same DB.
-    from sqlmodel import select as _select  # local: keep top imports clean
-
     with Session(engine) as session:
         existing_pending = len(
             session.exec(
-                _select(EmbedMentorNote)
+                select(EmbedMentorNote)
                 .where(EmbedMentorNote.agent_slug == "luxai1")
                 .where(EmbedMentorNote.status == "pending")
             ).all()
