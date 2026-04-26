@@ -345,3 +345,58 @@ def test_admin_stream_requires_internal_auth() -> None:
     # before honoring the HTTPException raised at handler entry.
     with client.stream("GET", "/users/admin/stream") as r:
         assert r.status_code == 401
+
+
+def test_multiplex_yields_queue_frame_when_heartbeat_fires_concurrently() -> None:
+    """Adversarial regression for the SSE data-loss bug Devin Review caught
+    on PR #40 (line 477).
+
+    Setup: zero-second heartbeat. Each loop iteration of
+    ``_multiplex_queue_with_heartbeat`` will see the heartbeat task as
+    already-done. We pre-fill the queue with two frames and run for a
+    short window. The OLD code branched into the heartbeat path first,
+    ``continue``-d past the dequeued frame, and silently lost it — so
+    the test would only see ``:hb`` lines and never the data frames.
+    The FIX yields the frame even when both tasks completed in the
+    same ``asyncio.wait`` round, so we MUST observe both frames.
+
+    A regression that re-introduces the mutually-exclusive branching
+    will produce zero data frames here (only heartbeats).
+    """
+    import asyncio as _asyncio
+
+    from sof_ai_api.routes.users import _multiplex_queue_with_heartbeat
+
+    async def _drive() -> list[str]:
+        q: _asyncio.Queue[str] = _asyncio.Queue()
+        await q.put("event: profile.created\ndata: {\"id\":1}\n\n")
+        await q.put("event: profile.created\ndata: {\"id\":2}\n\n")
+
+        async def _never_disconnect() -> bool:
+            return False
+
+        out: list[str] = []
+        # heartbeat=0 forces the both-tasks-done race on every iteration.
+        agen = _multiplex_queue_with_heartbeat(
+            q, _never_disconnect, heartbeat_seconds=0.0
+        )
+        try:
+            # Pull a bounded number of chunks to avoid an infinite hb loop.
+            for _ in range(20):
+                chunk = await _asyncio.wait_for(agen.__anext__(), timeout=1.0)
+                out.append(chunk)
+                # Stop once we've seen both data frames.
+                data_seen = sum(
+                    1 for c in out if c.startswith("event: profile.")
+                )
+                if data_seen >= 2:
+                    break
+        finally:
+            await agen.aclose()
+        return out
+
+    chunks = _asyncio.run(_drive())
+    data_chunks = [c for c in chunks if c.startswith("event: profile.")]
+    assert len(data_chunks) == 2, f"Expected both frames; got {chunks}"
+    assert "\"id\":1" in data_chunks[0]
+    assert "\"id\":2" in data_chunks[1]
