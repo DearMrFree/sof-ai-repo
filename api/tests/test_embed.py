@@ -301,3 +301,55 @@ def test_invalid_status_rejected() -> None:
     body = _payload(thread_id="thr_bad_010", status="garbage")
     r = client.post("/embed/conversations/upsert", json=body, headers=AUTH)
     assert r.status_code == 422
+
+
+def test_status_filter_pushed_into_sql_respects_limit() -> None:
+    """Regression for PR #30 follow-up:
+
+    With the filter applied in Python AFTER LIMIT/OFFSET, requesting
+    ``?status=active&limit=2`` could quietly return 1 (or 0) rows even
+    when many active rows exist beyond the first page. We seed 4
+    abandoned + 3 active rows, ask for ``?status=active&limit=10``,
+    and assert exactly 3 active items come back.
+    """
+    # Two batches of seeds. Backdate the abandoned set so they sort
+    # earlier than the active set (last_turn_at desc) — otherwise the
+    # broken implementation would happen to give the right answer.
+    with Session(engine) as session:
+        for i in range(4):
+            session.add(
+                EmbedConversation(
+                    agent_slug="luxai1_filter",
+                    client_thread_id=f"thr_filter_aband_{i}",
+                    owner_email="luxservicesbayarea@gmail.com",
+                    turn_count=1,
+                    transcript_json='[{"role":"user","content":"x"}]',
+                    customer_meta_json="{}",
+                    status="abandoned",
+                )
+            )
+        for i in range(3):
+            session.add(
+                EmbedConversation(
+                    agent_slug="luxai1_filter",
+                    client_thread_id=f"thr_filter_active_{i}",
+                    owner_email="luxservicesbayarea@gmail.com",
+                    turn_count=1,
+                    transcript_json='[{"role":"user","content":"x"}]',
+                    customer_meta_json="{}",
+                    status="active",
+                )
+            )
+        session.commit()
+
+    r = client.get(
+        "/embed/luxai1_filter/conversations?status=active&limit=10",
+        headers=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["items"]) == 3
+    assert all(item["status"] == "active" for item in data["items"])
+    # total still reflects the unfiltered slug count so the counter
+    # on the list page doesn't lie when a filter is applied.
+    assert data["total"] == 7
