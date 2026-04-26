@@ -15,9 +15,12 @@ Coverage:
 import os
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
-from sof_ai_api.db import init_db
+from sof_ai_api.db import engine, init_db
 from sof_ai_api.main import app
+from sof_ai_api.models import StudentProfessor, _utcnow
+from sof_ai_api.routes import enrollments as enrollments_route
 
 os.environ.setdefault("INTERNAL_API_KEY", "test-internal-key")
 init_db()
@@ -181,11 +184,6 @@ def test_professor_batch_savepoint_isolates_conflicts() -> None:
     Expected result: the fresh professor lands; the conflicting one is
     silently skipped; all earlier-existing professors are still there.
     """
-    from sof_ai_api.db import engine as _engine
-    from sof_ai_api.models import StudentProfessor as _SP, _utcnow as _now
-    from sof_ai_api.routes import enrollments as _routes
-    from sqlmodel import Session as _Session
-
     e = _create(
         student_email="savepoint@ai1.example",
         application_id=9101,
@@ -194,15 +192,15 @@ def test_professor_batch_savepoint_isolates_conflicts() -> None:
 
     # Pre-existing professors from _create(): freedom + devin (role=lead).
     # Insert a third row directly to mimic a concurrent caller's insert.
-    with _Session(_engine) as s:
+    with Session(engine) as s:
         s.add(
-            _SP(
+            StudentProfessor(
                 student_enrollment_id=enrollment_id,
                 professor_email="racer@example.com",
                 professor_name="Racer",
                 professor_kind="human",
                 role="guest",
-                added_at=_now(),
+                added_at=_utcnow(),
             )
         )
         s.commit()
@@ -210,7 +208,7 @@ def test_professor_batch_savepoint_isolates_conflicts() -> None:
     # Lie to the route on the first _load_professors() call so the
     # racer row isn't pre-skipped by the in-memory seen check. The
     # second call (serializer at the end) uses the real loader.
-    real_load = _routes._load_professors
+    real_load = enrollments_route._load_professors
     calls = {"n": 0}
 
     def lying_load(session, eid):  # type: ignore[no-untyped-def]
@@ -219,7 +217,7 @@ def test_professor_batch_savepoint_isolates_conflicts() -> None:
             return []
         return real_load(session, eid)
 
-    _routes._load_professors = lying_load
+    enrollments_route._load_professors = lying_load
     try:
         r = client.post(
             "/student-enrollments",
@@ -246,7 +244,7 @@ def test_professor_batch_savepoint_isolates_conflicts() -> None:
             headers=AUTH,
         )
     finally:
-        _routes._load_professors = real_load
+        enrollments_route._load_professors = real_load
 
     assert r.status_code == 201, r.text
     out = r.json()
