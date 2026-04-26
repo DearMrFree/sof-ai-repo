@@ -14,6 +14,7 @@ from .routes import (
     health,
     journals,
     progress,
+    twins,
     users,
     wallet,
 )
@@ -65,6 +66,7 @@ app.include_router(applications.router)
 app.include_router(enrollments.router)
 app.include_router(embed.router)
 app.include_router(users.router)
+app.include_router(twins.router)
 
 
 @app.get("/")
