@@ -558,7 +558,20 @@ class StudentEnrollment(SQLModel, table=True):
     (on hiatus), ``graduated`` (curriculum complete, full member of the
     community), ``withdrawn`` (left voluntarily — distinct from the
     application's ``expired``/``declined`` states).
+
+    The ``application_id`` UniqueConstraint backs the SELECT-then-INSERT
+    idempotency in ``create_enrollment``. NULL ``application_id`` is
+    allowed and not deduped (multi-NULL semantics) — those are explicit
+    out-of-band enrollments where the trio invites someone without an
+    application.
     """
+
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            name="uq_student_enrollment_application_id",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     application_id: Optional[int] = Field(default=None, index=True)
