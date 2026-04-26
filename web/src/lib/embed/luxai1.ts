@@ -199,7 +199,47 @@ async function fetchLivingContext(): Promise<string> {
   }
 }
 
-export async function buildSystemPrompt(): Promise<string> {
-  const ctx = await fetchLivingContext();
-  return PERSONA + ctx;
+/**
+ * Fetch every applied mentor note for the slug and concatenate them
+ * into a "Living trainer guidance" block for the system prompt.
+ *
+ * The route is public-read on the FastAPI side (the applied text IS
+ * the agent's published voice — gating it would block the chat path).
+ * Best-effort: if the API is down, we ship the static persona and
+ * skip mentor notes for this turn.
+ *
+ * Cache window is 5 minutes — mirrors ``fetchLivingContext`` so a
+ * trainer who applies a note at /embed/luxai1/trainer sees it land
+ * in the live agent within that window without a deploy.
+ */
+async function fetchActiveMentorNotes(slug: string): Promise<string> {
+  const base = getApiBaseUrl();
+  try {
+    const res = await fetch(`${base}/embed/${slug}/mentor-notes/active`, {
+      next: { revalidate: 300 },
+    } as RequestInit);
+    if (!res.ok) return "";
+    const data = (await res.json()) as {
+      items?: { id: number; applied_text?: string }[];
+    };
+    const lines = (data.items ?? [])
+      .map((n) => n.applied_text?.trim())
+      .filter((t): t is string => Boolean(t));
+    if (!lines.length) return "";
+    return (
+      `\n\n# Living trainer guidance (applied at sof.ai by your trainer)\n` +
+      lines.map((t, i) => `${i + 1}. ${t}`).join("\n") +
+      `\n`
+    );
+  } catch {
+    return "";
+  }
+}
+
+export async function buildSystemPrompt(slug: string = "luxai1"): Promise<string> {
+  const [ctx, mentor] = await Promise.all([
+    fetchLivingContext(),
+    fetchActiveMentorNotes(slug),
+  ]);
+  return PERSONA + ctx + mentor;
 }

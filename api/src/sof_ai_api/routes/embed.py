@@ -14,6 +14,12 @@ Surface:
   * POST /embed/insights/upsert             — internal-auth, idempotent
   * GET  /embed/{slug}/insights             — internal-auth, ranked list
   * GET  /embed/{slug}/insights/pending     — internal-auth, classifier work-queue
+  * POST /embed/{slug}/mentor-notes         — internal-auth, propose new note
+  * POST /embed/mentor-notes/{id}/round     — internal-auth, append review round
+  * POST /embed/mentor-notes/{id}/finalize  — internal-auth, flip to applied/rejected
+  * POST /embed/mentor-notes/{id}/retract   — internal-auth, retract an applied note
+  * GET  /embed/{slug}/mentor-notes         — internal-auth, list (filterable)
+  * GET  /embed/{slug}/mentor-notes/active  — public-read, applied notes for prompt
 """
 from __future__ import annotations
 
@@ -27,7 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from ..db import get_session
-from ..models import EmbedConversation, EmbedInsight, _utcnow
+from ..models import EmbedConversation, EmbedInsight, EmbedMentorNote, _utcnow
 from .wallet import require_internal_auth
 
 router = APIRouter(prefix="/embed", tags=["embed"])
@@ -670,3 +676,426 @@ def list_pending_insights(
         items=[PendingConversationOut(conversation=_serialize_full(r)) for r in page],
         total=len(eligible),
     )
+
+
+# ---------------------------------------------------------------------------
+# Mentor notes — trainer co-work (PR #34)
+#
+# Blajon proposes a capability ("Recognize 'piano' as specialty_transport").
+# The Web app fans the proposal through the existing Living-Article review
+# chain (Claude / Devin / Gemini). This module is the persistence layer:
+# it records each round's verdict and lets the chat endpoint pull active
+# (i.e. fully-reviewed-and-approved) notes at request time.
+# ---------------------------------------------------------------------------
+
+
+_MENTOR_NOTE_STATUSES = {
+    "pending",
+    "reviewing",
+    "applied",
+    "rejected",
+    "retracted",
+}
+_MENTOR_NOTE_REVIEWERS = {"claude", "devin", "gemini"}
+_MENTOR_NOTE_VERDICTS = {"approve", "reject"}
+
+
+class ReviewRoundIn(BaseModel):
+    reviewer_id: str = Field(..., min_length=1, max_length=32)
+    verdict: str = Field(..., min_length=1, max_length=16)
+    summary: str = Field(default="", max_length=600)
+    body: str = Field(default="", max_length=8000)
+
+
+class ReviewRoundOut(BaseModel):
+    reviewer_id: str
+    verdict: str
+    summary: str
+    body: str
+    recorded_at: str
+
+
+class ProposeMentorNoteIn(BaseModel):
+    proposed_by_email: str = Field(..., min_length=3, max_length=200)
+    proposed_text: str = Field(..., min_length=1, max_length=2000)
+    source_insight_id: Optional[int] = None
+
+
+class FinalizeMentorNoteIn(BaseModel):
+    """Closes the review chain for a note.
+
+    ``status`` must be ``applied`` or ``rejected``. When applying, a
+    distinct ``applied_text`` may be supplied if the review chain
+    tightened the phrasing; if omitted, ``proposed_text`` is used
+    verbatim.
+    """
+
+    status: str = Field(..., pattern="^(applied|rejected)$")
+    applied_text: Optional[str] = Field(default=None, max_length=2000)
+    rejection_reason: Optional[str] = Field(default=None, max_length=600)
+
+
+class MentorNoteOut(BaseModel):
+    id: int
+    agent_slug: str
+    proposed_by_email: str
+    proposed_at: str
+    status: str
+    proposed_text: str
+    applied_text: str
+    applied_at: Optional[str]
+    reviewer_chain: list[ReviewRoundOut]
+    source_insight_id: Optional[int]
+    rejection_reason: str
+
+
+class MentorNoteListOut(BaseModel):
+    items: list[MentorNoteOut]
+    total: int
+    by_status: dict[str, int]
+
+
+class ActiveMentorNoteOut(BaseModel):
+    """Trimmed shape for the ``/active`` route — no PII, no review chain.
+
+    The chat endpoint folds these straight into LuxAI1's system prompt, so
+    we keep the payload as small as possible (lower latency + fewer
+    tokens billed against Anthropic per turn).
+    """
+
+    id: int
+    applied_text: str
+    applied_at: Optional[str]
+
+
+class ActiveMentorNotesOut(BaseModel):
+    items: list[ActiveMentorNoteOut]
+
+
+def _serialize_mentor_note(row: EmbedMentorNote) -> MentorNoteOut:
+    chain_raw = _safe_load_json(row.reviewer_chain_json or "[]", [])
+    rounds: list[ReviewRoundOut] = []
+    if isinstance(chain_raw, list):
+        for entry in chain_raw:
+            if not isinstance(entry, dict):
+                continue
+            rounds.append(
+                ReviewRoundOut(
+                    reviewer_id=str(entry.get("reviewer_id") or ""),
+                    verdict=str(entry.get("verdict") or ""),
+                    summary=str(entry.get("summary") or ""),
+                    body=str(entry.get("body") or ""),
+                    recorded_at=str(entry.get("recorded_at") or ""),
+                )
+            )
+    return MentorNoteOut(
+        id=row.id or 0,
+        agent_slug=row.agent_slug,
+        proposed_by_email=row.proposed_by_email,
+        proposed_at=row.proposed_at.isoformat() if row.proposed_at else "",
+        status=row.status,
+        proposed_text=row.proposed_text,
+        applied_text=row.applied_text,
+        applied_at=row.applied_at.isoformat() if row.applied_at else None,
+        reviewer_chain=rounds,
+        source_insight_id=row.source_insight_id,
+        rejection_reason=row.rejection_reason,
+    )
+
+
+@router.post(
+    "/{slug}/mentor-notes",
+    response_model=MentorNoteOut,
+    status_code=201,
+    dependencies=[Depends(require_internal_auth)],
+)
+def propose_mentor_note(
+    slug: str,
+    payload: ProposeMentorNoteIn,
+    session: Session = Depends(get_session),
+) -> MentorNoteOut:
+    """Record a new trainer-proposed capability at ``status="pending"``.
+
+    The Web app calls this before kicking off the review chain so the
+    proposal is visible in the trainer console even while reviews are
+    still running. Subsequent review rounds advance the row in-place
+    via ``/mentor-notes/{id}/round``.
+    """
+    if (
+        payload.source_insight_id is not None
+        and session.get(EmbedInsight, payload.source_insight_id) is None
+    ):
+        raise HTTPException(status_code=404, detail="source_insight_not_found")
+
+    row = EmbedMentorNote(
+        agent_slug=slug,
+        proposed_by_email=payload.proposed_by_email.strip().lower(),
+        proposed_text=payload.proposed_text.strip(),
+        source_insight_id=payload.source_insight_id,
+        status="pending",
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _serialize_mentor_note(row)
+
+
+@router.post(
+    "/mentor-notes/{note_id}/round",
+    response_model=MentorNoteOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def append_mentor_note_round(
+    note_id: int,
+    payload: ReviewRoundIn,
+    session: Session = Depends(get_session),
+) -> MentorNoteOut:
+    """Append a single reviewer's verdict to a note's review chain.
+
+    Idempotency: if a round from the same ``reviewer_id`` already exists,
+    it is replaced in-place rather than appended. This makes the route
+    safe to retry without polluting the chain with duplicate entries.
+
+    Status side-effect: the first round flips ``pending`` → ``reviewing``.
+    Finalization (``applied`` / ``rejected``) lives on a separate route
+    so the orchestrator can decide based on the full chain.
+    """
+    if payload.reviewer_id not in _MENTOR_NOTE_REVIEWERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"reviewer_id must be one of {sorted(_MENTOR_NOTE_REVIEWERS)}",
+        )
+    if payload.verdict not in _MENTOR_NOTE_VERDICTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"verdict must be one of {sorted(_MENTOR_NOTE_VERDICTS)}",
+        )
+    row = session.get(EmbedMentorNote, note_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="mentor_note_not_found")
+    if row.status in {"applied", "rejected", "retracted"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"mentor_note_terminal_status: {row.status}",
+        )
+
+    chain = _safe_load_json(row.reviewer_chain_json or "[]", [])
+    if not isinstance(chain, list):
+        chain = []
+    new_entry = {
+        "reviewer_id": payload.reviewer_id,
+        "verdict": payload.verdict,
+        "summary": payload.summary,
+        "body": payload.body,
+        "recorded_at": _utcnow().isoformat(),
+    }
+    replaced = False
+    for i, entry in enumerate(chain):
+        if isinstance(entry, dict) and entry.get("reviewer_id") == payload.reviewer_id:
+            chain[i] = new_entry
+            replaced = True
+            break
+    if not replaced:
+        chain.append(new_entry)
+
+    row.reviewer_chain_json = json.dumps(chain)
+    if row.status == "pending":
+        row.status = "reviewing"
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _serialize_mentor_note(row)
+
+
+@router.post(
+    "/mentor-notes/{note_id}/finalize",
+    response_model=MentorNoteOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def finalize_mentor_note(
+    note_id: int,
+    payload: FinalizeMentorNoteIn,
+    session: Session = Depends(get_session),
+) -> MentorNoteOut:
+    """Close out a note's review with a terminal status.
+
+    The Web orchestrator calls this after the review chain has run end
+    to end. Rejection requires at least one ``reject`` verdict in the
+    chain; application requires every reviewer in
+    ``_MENTOR_NOTE_REVIEWERS`` to have voted ``approve`` (the "trust
+    the review chain" guarantee Dr. Cheteni signed off on for PR #34).
+
+    Idempotent in the same direction: re-applying an already-applied
+    note is a no-op (returns 200). Cross-direction transitions (e.g.
+    apply → reject) are blocked with 409.
+    """
+    row = session.get(EmbedMentorNote, note_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="mentor_note_not_found")
+    if row.status == payload.status:
+        return _serialize_mentor_note(row)
+    if row.status in {"applied", "rejected", "retracted"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"mentor_note_terminal_status: {row.status}",
+        )
+
+    chain = _safe_load_json(row.reviewer_chain_json or "[]", [])
+    if not isinstance(chain, list):
+        chain = []
+    verdicts: dict[str, str] = {}
+    for entry in chain:
+        if isinstance(entry, dict):
+            rid = str(entry.get("reviewer_id") or "")
+            v = str(entry.get("verdict") or "")
+            if rid and v:
+                verdicts[rid] = v
+
+    if payload.status == "applied":
+        missing = _MENTOR_NOTE_REVIEWERS - verdicts.keys()
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"mentor_note_missing_reviewers: {sorted(missing)}",
+            )
+        if any(v != "approve" for v in verdicts.values()):
+            raise HTTPException(
+                status_code=422,
+                detail="mentor_note_has_rejection",
+            )
+        row.status = "applied"
+        row.applied_text = (
+            payload.applied_text.strip()
+            if payload.applied_text and payload.applied_text.strip()
+            else row.proposed_text
+        )
+        row.applied_at = _utcnow()
+        row.rejection_reason = ""
+    else:  # rejected
+        if not any(v == "reject" for v in verdicts.values()):
+            raise HTTPException(
+                status_code=422,
+                detail="mentor_note_no_rejection_in_chain",
+            )
+        row.status = "rejected"
+        row.rejection_reason = (payload.rejection_reason or "").strip()[:600]
+        row.applied_text = ""
+        row.applied_at = None
+
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _serialize_mentor_note(row)
+
+
+@router.post(
+    "/mentor-notes/{note_id}/retract",
+    response_model=MentorNoteOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def retract_mentor_note(
+    note_id: int,
+    session: Session = Depends(get_session),
+) -> MentorNoteOut:
+    """Take an applied note out of the live system prompt.
+
+    Distinct from rejection: rejection means the note never shipped;
+    retraction means it shipped, the trainer learned something, and is
+    pulling it back. Only ``applied`` notes can be retracted.
+    """
+    row = session.get(EmbedMentorNote, note_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="mentor_note_not_found")
+    if row.status != "applied":
+        raise HTTPException(
+            status_code=409,
+            detail=f"mentor_note_not_applied: {row.status}",
+        )
+    row.status = "retracted"
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _serialize_mentor_note(row)
+
+
+@router.get(
+    "/{slug}/mentor-notes",
+    response_model=MentorNoteListOut,
+    dependencies=[Depends(require_internal_auth)],
+)
+def list_mentor_notes(
+    slug: str,
+    status: Optional[str] = Query(default=None, max_length=16),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> MentorNoteListOut:
+    """Trainer-console list view: most-recent first, optionally filtered.
+
+    ``by_status`` tallies the *full* set for the slug regardless of the
+    page filter so the UI can render every chip count without a second
+    round-trip — same idiom as ``list_insights``.
+    """
+    if status and status not in _MENTOR_NOTE_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of {sorted(_MENTOR_NOTE_STATUSES)}",
+        )
+
+    page_query = select(EmbedMentorNote).where(EmbedMentorNote.agent_slug == slug)
+    if status:
+        page_query = page_query.where(EmbedMentorNote.status == status)
+    rows = session.exec(
+        page_query.order_by(
+            EmbedMentorNote.proposed_at.desc()  # type: ignore[union-attr]
+        )
+        .offset(offset)
+        .limit(limit)
+    ).all()
+
+    all_rows = session.exec(
+        select(EmbedMentorNote).where(EmbedMentorNote.agent_slug == slug)
+    ).all()
+    by_status: dict[str, int] = {s: 0 for s in _MENTOR_NOTE_STATUSES}
+    for r in all_rows:
+        by_status[r.status] = by_status.get(r.status, 0) + 1
+
+    return MentorNoteListOut(
+        items=[_serialize_mentor_note(r) for r in rows],
+        total=len(all_rows),
+        by_status=by_status,
+    )
+
+
+@router.get(
+    "/{slug}/mentor-notes/active",
+    response_model=ActiveMentorNotesOut,
+)
+def list_active_mentor_notes(
+    slug: str,
+    session: Session = Depends(get_session),
+) -> ActiveMentorNotesOut:
+    """Public-read shortlist of notes the chat endpoint folds into the
+    system prompt. No auth — the applied text is the agent's published
+    voice; the trainer console (which exposes the full review chain
+    and proposer email) is what's gated.
+
+    Ordered by ``applied_at`` ascending so the trainer's most-trusted
+    (oldest, most-tested) guidance lands first in the prompt and
+    later additions stack underneath.
+    """
+    rows = session.exec(
+        select(EmbedMentorNote)
+        .where(EmbedMentorNote.agent_slug == slug)
+        .where(EmbedMentorNote.status == "applied")
+        .order_by(EmbedMentorNote.applied_at.asc())  # type: ignore[union-attr]
+    ).all()
+    items = [
+        ActiveMentorNoteOut(
+            id=r.id or 0,
+            applied_text=r.applied_text,
+            applied_at=r.applied_at.isoformat() if r.applied_at else None,
+        )
+        for r in rows
+    ]
+    return ActiveMentorNotesOut(items=items)

@@ -146,7 +146,7 @@ export async function POST(
     }
   }
 
-  const system = await buildSystemPrompt();
+  const system = await buildSystemPrompt(slug);
   const client = new Anthropic({ apiKey });
   const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
   const userAgent = req.headers.get("user-agent") ?? undefined;

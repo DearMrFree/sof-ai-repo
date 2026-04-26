@@ -303,6 +303,21 @@ export default async function InsightsListPage(props: {
                     {conversation.turn_count === 1 ? "" : "s"}
                   </p>
                 </Link>
+                {insight.suggested_capability && (
+                  <div className="px-4 pb-3 -mt-1">
+                    <Link
+                      href={`/embed/${slug}/trainer?from_insight=${
+                        insight.id
+                      }&suggested=${encodeURIComponent(
+                        insight.suggested_capability,
+                      )}`}
+                      className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Propose capability →
+                    </Link>
+                  </div>
+                )}
               </li>
             );
           })}

@@ -274,7 +274,7 @@ function isRetryableAnthropicError(err: unknown): boolean {
   );
 }
 
-async function runAnthropicReview(
+export async function runAnthropicReview(
   system: string,
   userMessage: string,
 ): Promise<string> {
@@ -318,7 +318,7 @@ async function runAnthropicReview(
   throw lastErr;
 }
 
-async function runGeminiReview(
+export async function runGeminiReview(
   system: string,
   userMessage: string,
 ): Promise<string> {
