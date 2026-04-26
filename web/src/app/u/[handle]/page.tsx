@@ -12,7 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { getPerson, listPeople } from "@/lib/people";
-import { AGENTS } from "@/lib/agents";
+import { AGENTS, getStudentAgent, listStudentAgents } from "@/lib/agents";
 import { buildsFor } from "@/lib/builds";
 import { BuildCard } from "@/components/BuildCard";
 import { BuildGrid } from "@/components/BuildGrid";
@@ -25,6 +25,7 @@ export function generateStaticParams() {
   return [
     ...listPeople().map((p) => ({ handle: p.handle })),
     ...AGENTS.map((a) => ({ handle: a.id })),
+    ...listStudentAgents().map((s) => ({ handle: s.id })),
   ];
 }
 
@@ -42,7 +43,7 @@ export async function generateMetadata({
 }
 
 interface ResolvedProfile {
-  kind: "person" | "agent";
+  kind: "person" | "agent" | "student-agent";
   handle: string; // without @
   name: string;
   tagline: string;
@@ -114,6 +115,48 @@ function resolveProfile(handleParam: string): ResolvedProfile | null {
       agentId: agent.id,
     };
   }
+  const student = getStudentAgent(handle);
+  if (student) {
+    const links: { label: string; href: string }[] = [];
+    if (student.embedHost) {
+      links.push({
+        label: student.embedHost,
+        href: `https://${student.embedHost}`,
+      });
+    }
+    if (student.trainerConsoleHref) {
+      links.push({
+        label: "Trainer console",
+        href: student.trainerConsoleHref,
+      });
+    }
+    if (student.insightsHref) {
+      links.push({ label: "Insights", href: student.insightsHref });
+    }
+    return {
+      kind: "student-agent",
+      handle: student.id,
+      name: student.name,
+      tagline: student.tagline,
+      bio: student.bio,
+      emoji: student.emoji,
+      gradient: student.avatarGradient,
+      accentThird: "#22d3ee",
+      pills: [
+        `Trained by @${student.ownerHandle}`,
+        ...student.strengths.slice(0, 2),
+      ],
+      joined: student.joined,
+      highlightReel: `${student.name} is a sof.ai student agent owned and trained by @${student.ownerHandle}. ${student.embedHost ? `Live at ${student.embedHost}.` : ""} Every visitor turn becomes training data; new capabilities ship via the trainer co-work loop within minutes.`,
+      followers: 0,
+      following: 1,
+      xp: 0,
+      streakDays: 1,
+      topAgents: ["devin", "claude", "gemini"],
+      links: links.length ? links : undefined,
+      agentId: student.id,
+    };
+  }
   return null;
 }
 
@@ -134,8 +177,35 @@ export default function ProfilePage({
   const [c1, c2] = profile.gradient;
   const c3 = profile.accentThird;
 
+  // Resolve top-agent collaborators from BOTH the tutor AGENTS registry
+  // and the STUDENT_AGENTS registry so a trainer's profile (e.g. Blajon)
+  // surfaces the agent they're training (e.g. luxai1) in the rail.
   const topAgents = profile.topAgents
-    .map((id) => AGENTS.find((a) => a.id === id))
+    .map((id) => {
+      const tutor = AGENTS.find((a) => a.id === id);
+      if (tutor) {
+        return {
+          id: tutor.id,
+          name: tutor.name,
+          emoji: tutor.emoji,
+          avatarGradient: tutor.avatarGradient,
+          firstStrength: tutor.strengths[0] ?? "",
+          online: tutor.online,
+        };
+      }
+      const student = listStudentAgents().find((s) => s.id === id);
+      if (student) {
+        return {
+          id: student.id,
+          name: student.name,
+          emoji: student.emoji,
+          avatarGradient: student.avatarGradient,
+          firstStrength: student.strengths[0] ?? "",
+          online: true,
+        };
+      }
+      return null;
+    })
     .filter((a): a is NonNullable<typeof a> => Boolean(a));
 
   return (
@@ -376,7 +446,11 @@ export default function ProfilePage({
         <aside className="space-y-6">
           {/* Educoin® wallet card — every profile (human or agent) has one */}
           <WalletCard
-            ownerType={profile.kind === "agent" ? "agent" : "user"}
+            ownerType={
+              profile.kind === "agent" || profile.kind === "student-agent"
+                ? "agent"
+                : "user"
+            }
             ownerId={profile.handle}
             displayName={profile.name}
           />
@@ -393,13 +467,21 @@ export default function ProfilePage({
                     href={`/u/${agent.id}`}
                     className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-zinc-900"
                   >
-                    <AgentAvatar agent={agent} size="sm" showStatus />
+                    <AgentAvatar
+                      agent={{
+                        emoji: agent.emoji,
+                        avatarGradient: agent.avatarGradient,
+                        online: agent.online,
+                      }}
+                      size="sm"
+                      showStatus
+                    />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-white">
                         {agent.name}
                       </p>
                       <p className="truncate text-[11px] text-zinc-500">
-                        {agent.strengths[0]}
+                        {agent.firstStrength}
                       </p>
                     </div>
                   </Link>

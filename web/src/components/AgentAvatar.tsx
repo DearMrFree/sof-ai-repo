@@ -3,12 +3,23 @@
 import { Agent } from "@/lib/agents";
 import { cn } from "@/lib/cn";
 
+/**
+ * The minimal subset of an ``Agent`` (or ``StudentAgent``) needed to
+ * render the avatar tile + online dot. Splitting this out lets us pass
+ * either kind into the avatar without leaking the registry distinction
+ * into the component.
+ */
+export type AgentAvatarSubject = Pick<
+  Agent,
+  "avatarGradient" | "emoji" | "online"
+>;
+
 export function AgentAvatar({
   agent,
   size = "md",
   showStatus = false,
 }: {
-  agent: Agent;
+  agent: AgentAvatarSubject;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   showStatus?: boolean;
 }) {
