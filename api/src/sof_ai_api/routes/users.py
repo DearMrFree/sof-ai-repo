@@ -303,12 +303,21 @@ def list_users(
     if type:
         base = base.where(UserProfile.user_type == _validate_user_type(type))
     if q:
-        like = f"%{q.strip().lower()}%"
+        # Escape SQL LIKE metacharacters in user input. SQLAlchemy
+        # parameterizes the value (so no injection), but ``%`` and ``_``
+        # are still interpreted as wildcards by the engine — searching
+        # for ``%`` would otherwise produce ``%%%`` and match every row;
+        # ``_`` would match any single-character string. Use a non-SQL
+        # escape char (``\``) and tell ilike() about it explicitly.
+        cleaned = (
+            q.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        like = f"%{cleaned}%"
         base = base.where(
             or_(
-                col(UserProfile.display_name).ilike(like),
-                col(UserProfile.handle).ilike(like),
-                col(UserProfile.tagline).ilike(like),
+                col(UserProfile.display_name).ilike(like, escape="\\"),
+                col(UserProfile.handle).ilike(like, escape="\\"),
+                col(UserProfile.tagline).ilike(like, escape="\\"),
             )
         )
 
