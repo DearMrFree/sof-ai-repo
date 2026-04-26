@@ -285,10 +285,16 @@
       })
       .catch(function () {
         hideTyping();
-        addMsg(
-          "assistant",
-          "I'm offline for a moment. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.",
-        );
+        // Push the error reply into the running thread + persist it.
+        // Without this, the saved transcript ends with an unanswered
+        // user message; the next turn would push a second consecutive
+        // user role and Anthropic (which requires strict alternation)
+        // 400s every subsequent send until "Start over" is clicked.
+        var errMsg =
+          "I'm offline for a moment. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.";
+        thread.push({ role: "assistant", content: errMsg });
+        saveThread(thread);
+        addMsg("assistant", errMsg);
       })
       .then(function () {
         pending = false;

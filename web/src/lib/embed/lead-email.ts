@@ -42,8 +42,12 @@ export async function notifyBlajon(
     ua: meta.userAgent ? escapeHtml(meta.userAgent) : "",
   };
 
+  // Both hrefs need belt-and-suspenders sanitization since they're
+  // interpolated into HTML attribute values. Phone strips to digits
+  // and `+`; email is HTML-escaped so a quote character in the
+  // address can't break out of the attribute.
   const phoneHref = lead.phone ? `tel:${lead.phone.replace(/[^+\d]/g, "")}` : "";
-  const emailHref = lead.email ? `mailto:${lead.email}` : "";
+  const emailHref = lead.email ? `mailto:${escapeHtml(lead.email)}` : "";
 
   const subject = `[AI1 lead] ${safe.service} \u2014 ${safe.name}`;
   const text = [

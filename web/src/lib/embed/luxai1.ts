@@ -155,13 +155,17 @@ I'm just here to gather what they need from you so they can respond fast."
 async function fetchLivingContext(): Promise<string> {
   const base = getApiBaseUrl();
   try {
+    // 5-minute revalidate window: training context updates on sof.ai
+    // (a new article, a new mentor note, an additional contribution)
+    // are reflected within 5 minutes of being recorded, but we don't
+    // hammer the FastAPI backend on every chat turn. `cache: "no-store"`
+    // would defeat `revalidate` entirely — Next.js gives priority to
+    // no-store and skips the cache.
     const [appRes, enrRes] = await Promise.all([
       fetch(`${base}/applications/2`, {
-        cache: "no-store",
         next: { revalidate: 300 },
       } as RequestInit),
       fetch(`${base}/student-enrollments/1`, {
-        cache: "no-store",
         next: { revalidate: 300 },
       } as RequestInit),
     ]);
