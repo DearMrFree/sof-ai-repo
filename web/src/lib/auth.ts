@@ -3,6 +3,7 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 
 import { displayNameFromEmail, generatePersona } from "./personaGen";
+import { verifyMagicLinkToken } from "./auth/magicLink";
 
 const hasGoogle =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
@@ -83,33 +84,64 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
-    // Email path — just one field. Display name is auto-derived from the
-    // local-part ("ada.lovelace@x.com" → "Ada Lovelace"); no second form
-    // question. Still not production-auth (no magic link yet), but the UX
-    // is intentionally one-liner.
+    // Magic-link path. The /signin form calls
+    // POST /api/auth/magic-link/request to mint a token + email it via
+    // Resend; the link in that email lands on /signin/magic which
+    // signs in via this provider. The token is consumed (single-use,
+    // expiring) inside FastAPI — see ``verifyMagicLinkToken``.
     CredentialsProvider({
-      id: "email",
-      name: "Sign in with email",
+      id: "magic-link",
+      name: "Email magic link",
       credentials: {
-        email: { label: "Email", type: "email", placeholder: "you@sof.ai" },
+        token: { label: "Token", type: "text" },
       },
       async authorize(credentials) {
-        const email = credentials?.email?.trim().toLowerCase();
-        if (!email || !email.includes("@")) return null;
-        const name = displayNameFromEmail(email);
-        return {
-          // Use the full normalized email as the stable identity. The
-          // display handle is separately derived via handleFromEmail for
-          // profile URLs; it intentionally discards the domain and is
-          // not unique across domains, so it must not be used as an
-          // account key.
-          id: `email:${email}`,
-          email,
-          name,
-          image: null,
-        };
+        const token = credentials?.token?.trim();
+        if (!token) return null;
+        try {
+          const email = await verifyMagicLinkToken(token);
+          if (!email || !email.includes("@")) return null;
+          const name = displayNameFromEmail(email);
+          return {
+            id: `email:${email}`,
+            email,
+            name,
+            image: null,
+          };
+        } catch {
+          // Surface as a generic auth failure; the /signin/magic page
+          // reads the NextAuth error code and renders a friendlier
+          // "this link is invalid or has expired" message.
+          return null;
+        }
       },
     }),
+    // Dev-only one-shot email entry — same shape as the prior Credentials
+    // provider but gated off in production so prod can never accept an
+    // unverified email as a real identity. Magic-link is the production
+    // path. Local development still gets a 0-friction email flow.
+    ...(process.env.NODE_ENV !== "production"
+      ? [
+          CredentialsProvider({
+            id: "email",
+            name: "Email (dev only)",
+            credentials: {
+              email: { label: "Email", type: "email", placeholder: "you@sof.ai" },
+            },
+            async authorize(credentials) {
+              const email = credentials?.email?.trim().toLowerCase();
+              if (!email || !email.includes("@")) return null;
+              const name = displayNameFromEmail(email);
+              return {
+                id: `email:${email}`,
+                email,
+                name,
+                image: null,
+              };
+            },
+          }),
+        ]
+      : []),
   ],
   pages: {
     signIn: "/signin",
