@@ -13,6 +13,7 @@ Coverage:
 from __future__ import annotations
 
 import hashlib
+import threading
 from datetime import timedelta
 
 import pytest
@@ -177,8 +178,6 @@ def test_concurrent_verify_only_one_wins() -> None:
     threshold). The fix is an atomic ``UPDATE … WHERE used_at IS NULL``
     that only one writer can satisfy.
     """
-    import threading
-
     out = _request("race@example.com")
     token = out["token"]
 
