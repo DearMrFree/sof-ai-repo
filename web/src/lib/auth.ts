@@ -7,9 +7,42 @@ import { displayNameFromEmail, generatePersona } from "./personaGen";
 const hasGoogle =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
 
+// When deployed at ai.thevrschool.org, we want the NextAuth session cookie
+// scoped to .thevrschool.org so a future signed-in surface on the apex
+// (vr-enrollment) can read the same identity (full SSO across the school
+// within a school). Set NEXTAUTH_COOKIE_DOMAIN=.thevrschool.org in prod.
+// Left undefined in dev/sof.ai-only deployments → NextAuth defaults to
+// the request host (current behavior, no change).
+const sharedCookieDomain = process.env.NEXTAUTH_COOKIE_DOMAIN || undefined;
+const useSecureCookies =
+  (process.env.NEXTAUTH_URL ?? "").startsWith("https://") ||
+  process.env.NODE_ENV === "production";
+const sessionCookieName = useSecureCookies
+  ? "__Secure-next-auth.session-token"
+  : "next-auth.session-token";
+
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   secret: process.env.NEXTAUTH_SECRET ?? "dev-insecure-secret-change-me",
+  // Only override defaults when a shared domain is configured. Otherwise
+  // NextAuth's host-only default keeps backwards compatibility for
+  // deployments still served from sof.ai or localhost.
+  ...(sharedCookieDomain
+    ? {
+        cookies: {
+          sessionToken: {
+            name: sessionCookieName,
+            options: {
+              httpOnly: true,
+              sameSite: "lax" as const,
+              path: "/",
+              secure: useSecureCookies,
+              domain: sharedCookieDomain,
+            },
+          },
+        },
+      }
+    : {}),
   providers: [
     ...(hasGoogle
       ? [
