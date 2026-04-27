@@ -7,6 +7,7 @@ from .db import get_session, init_db
 from .routes import (
     applications,
     articles,
+    auth,
     challenges,
     devin,
     embed,
@@ -73,6 +74,7 @@ app.include_router(enrollments.router)
 app.include_router(embed.router)
 app.include_router(users.router)
 app.include_router(twins.router)
+app.include_router(auth.router)
 
 
 @app.get("/")

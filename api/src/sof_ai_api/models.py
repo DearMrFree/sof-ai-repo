@@ -917,3 +917,33 @@ class TwinSkill(SQLModel, table=True):
     applied_at: Optional[datetime] = Field(default=None, index=True)
     reviewer_chain_json: str = Field(default="[]")
     rejection_reason: str = Field(default="", max_length=600)
+
+
+class MagicLinkToken(SQLModel, table=True):
+    """A single-use, expiring token authorising a magic-link sign-in.
+
+    The Next.js app proxies a request to ``POST /auth/magic-link/request``
+    with an email; FastAPI mints a 32-byte random token, stores only the
+    SHA-256 hash, and returns the raw token to the proxy so it can be
+    embedded in a Resend email link. The user clicks the link, the proxy
+    POSTs the raw token to ``POST /auth/magic-link/verify``, FastAPI
+    looks up by hash, marks the row used, and returns the email — which
+    the proxy hands to NextAuth's ``magic-link`` CredentialsProvider as
+    the sign-in identity.
+
+    Storing only the hash means a database leak does not yield usable
+    tokens (an attacker would still need to invert SHA-256), and the
+    ``used_at`` column makes every token strictly single-use even if the
+    same link is opened twice (e.g. an email-prefetch followed by a
+    real click). The 15-minute ``expires_at`` window mirrors NextAuth's
+    own EmailProvider default and keeps the attack surface small.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(index=True, max_length=200)
+    token_hash: str = Field(unique=True, index=True, max_length=128)
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    expires_at: datetime = Field(index=True)
+    used_at: Optional[datetime] = Field(default=None, index=True)
+    ip_hash: str = Field(default="", max_length=128)
+    user_agent: str = Field(default="", max_length=300)

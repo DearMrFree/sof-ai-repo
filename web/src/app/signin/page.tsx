@@ -46,6 +46,7 @@ function SignInInner() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
+  const [magicSent, setMagicSent] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,17 +88,35 @@ function SignInInner() {
     e.preventDefault();
     setEmailLoading(true);
     setError(null);
-    const res = await signIn("email", {
-      email,
-      redirect: false,
-      callbackUrl,
-    });
-    setEmailLoading(false);
-    if (res?.error) {
-      setError("That email didn't work. Try again or jump in as a guest.");
-      return;
+    try {
+      const resp = await fetch("/api/auth/magic-link/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, callbackUrl }),
+      });
+      const data = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        delivered?: boolean;
+        previewLink?: string;
+      };
+      if (!resp.ok) {
+        setError(
+          data.error ||
+            "We couldn't send a sign-in link right now. Please try again.",
+        );
+        return;
+      }
+      // Dev/preview without RESEND_API_KEY: auto-follow the preview link
+      // so the developer flow stays one-click. In production this branch
+      // is impossible because the API never returns previewLink.
+      if (data.previewLink && process.env.NODE_ENV !== "production") {
+        window.location.href = data.previewLink;
+        return;
+      }
+      setMagicSent(true);
+    } finally {
+      setEmailLoading(false);
     }
-    router.push(callbackUrl);
   }
 
   return (
@@ -193,7 +212,7 @@ function SignInInner() {
                 Continue with Google
               </button>
 
-              {/* Email — collapsed by default, one field when expanded */}
+              {/* Email magic-link — collapsed by default, one field when expanded */}
               {!emailOpen ? (
                 <button
                   type="button"
@@ -201,8 +220,33 @@ function SignInInner() {
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-sm font-medium text-zinc-200 transition hover:bg-zinc-800"
                 >
                   <Mail className="h-4 w-4" />
-                  Use my email instead
+                  Email me a sign-in link
                 </button>
+              ) : magicSent ? (
+                <div
+                  className="space-y-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-100"
+                  data-testid="magic-link-sent"
+                >
+                  <div className="flex items-center gap-2 font-semibold">
+                    <Mail className="h-4 w-4 text-emerald-300" />
+                    Check your inbox
+                  </div>
+                  <p className="text-[12px] leading-relaxed text-emerald-200/90">
+                    We sent a sign-in link to{" "}
+                    <span className="font-medium text-white">{email}</span>. The
+                    link expires in 15 minutes and can only be used once.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMagicSent(false);
+                      setEmail("");
+                    }}
+                    className="text-[11px] text-emerald-300 underline-offset-4 hover:underline"
+                  >
+                    Use a different email
+                  </button>
+                </div>
               ) : (
                 <form onSubmit={handleEmail} className="space-y-2">
                   <div className="relative">
@@ -222,12 +266,12 @@ function SignInInner() {
                     disabled={emailLoading || email.trim().length === 0}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:brightness-110 disabled:opacity-50"
                   >
-                    {emailLoading ? "Signing you in…" : "Continue"}
+                    {emailLoading ? "Sending…" : "Send me a magic link"}
                     <ArrowRight className="h-4 w-4" />
                   </button>
                   <p className="text-[11px] leading-relaxed text-zinc-500">
-                    We&apos;ll derive your handle and display name from this
-                    email — no extra form fields. You can change them later.
+                    We&apos;ll email you a one-time link. It expires in 15
+                    minutes and can only be used once. No password to remember.
                   </p>
                 </form>
               )}
