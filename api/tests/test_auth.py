@@ -166,3 +166,40 @@ def test_email_normalised_on_verify() -> None:
     )
     assert resp.status_code == 200
     assert resp.json()["email"] == "fred@example.com"
+
+
+def test_concurrent_verify_only_one_wins() -> None:
+    """Regression: under concurrent verify calls, exactly one returns 200.
+
+    Devin Review caught a real bug in the prior implementation — the
+    "set used_at, refresh, check delta" guard let two near-simultaneous
+    verifies both pass (delta ≈ 0s for both, well within the 5s
+    threshold). The fix is an atomic ``UPDATE … WHERE used_at IS NULL``
+    that only one writer can satisfy.
+    """
+    import threading
+
+    out = _request("race@example.com")
+    token = out["token"]
+
+    results: list[int] = []
+    barrier = threading.Barrier(8)
+
+    def verify() -> None:
+        barrier.wait()
+        resp = client.post(
+            "/auth/magic-link/verify",
+            json={"token": token},
+            headers=AUTH,
+        )
+        results.append(resp.status_code)
+
+    threads = [threading.Thread(target=verify) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Exactly one wins; everyone else gets 409.
+    assert results.count(200) == 1, results
+    assert results.count(409) == 7, results

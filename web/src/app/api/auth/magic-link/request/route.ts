@@ -98,7 +98,26 @@ export async function POST(req: Request): Promise<Response> {
 
   const send = await sendMagicLinkEmail({ to: email, link, ttlMinutes: 15 });
 
-  // In dev/preview without a RESEND_API_KEY, fall through with a hint.
+  // In production we treat a non-delivery as a hard failure (return 502)
+  // so the client never shows "Check your inbox" for an email that
+  // never went out. Without this gate, Resend being down silently
+  // wastes the user's rate-limit budget on a token they can't see.
+  //
+  // In dev/preview without a RESEND_API_KEY, the helper falls back to
+  // ``provider: "logged"`` and ``delivered: false`` — that is the
+  // expected one-click path; the ``previewLink`` lets us auto-follow.
+  // We don't 502 in that case.
+  const isLoggedFallback = send.provider === "logged";
+  if (!send.delivered && !isLoggedFallback) {
+    return NextResponse.json(
+      {
+        error:
+          "We couldn't send the sign-in email right now. Please try again in a minute.",
+      },
+      { status: 502 },
+    );
+  }
+
   // We do NOT return the raw token to the client in production — that
   // would be a foot-gun (anyone could read it from devtools). The
   // ``previewLink`` field is gated on NODE_ENV !== "production".
