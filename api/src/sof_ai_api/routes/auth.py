@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -130,8 +130,8 @@ def request_magic_link(
         raise HTTPException(
             status_code=429,
             detail=(
-                f"Too many magic-link requests for this email. "
-                f"Try again after the previous link expires."
+                "Too many magic-link requests for this email. "
+                "Try again after the previous link expires."
             ),
         )
 
