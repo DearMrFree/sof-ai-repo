@@ -36,6 +36,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from ..db import get_session
@@ -164,11 +165,16 @@ def verify_magic_link(
     payload: VerifyIn,
     session: Session = Depends(get_session),
 ) -> VerifyOut:
-    """Consume a magic-link token. Single-use enforced even under
-    concurrent verifies: we set ``used_at`` and re-read; if the row was
-    already consumed by a sibling request, the read returns a
-    ``used_at`` that does not equal our intended timestamp and we
-    reject.
+    """Consume a magic-link token. Single-use is enforced atomically at
+    the SQL level: an ``UPDATE … WHERE used_at IS NULL`` only succeeds
+    once, so under concurrent verifies exactly one request wins.
+
+    The previous "set used_at, refresh, check delta" guard was unsafe —
+    two near-simultaneous verifies could both pass the in-Python
+    ``used_at is None`` check, both run UPDATEs, and both observe a
+    re-read ``used_at`` within seconds of ``now`` (the second writer
+    silently overwrites the first), so both returned 200. The fix is
+    to make the check-and-set atomic.
     """
 
     raw = (payload.token or "").strip()
@@ -194,24 +200,23 @@ def verify_magic_link(
     if row.used_at is not None:
         raise HTTPException(status_code=409, detail="token already used")
 
-    # Mark used. We rely on ``token_hash`` being globally unique (a
-    # ``UNIQUE`` constraint at the model level) so a sibling request
-    # cannot insert a competing row mid-flight; the worst-case race is
-    # two ``verify`` calls landing simultaneously and both passing the
-    # ``used_at is None`` check above. To close that race we re-fetch
-    # after commit and reject if our own commit didn't win.
-    row.used_at = now
-    session.add(row)
+    # Atomic conditional update. ``rowcount`` reflects how many rows the
+    # UPDATE actually mutated — if 0, a sibling request consumed the
+    # token between our SELECT above and this UPDATE. Postgres' default
+    # READ COMMITTED isolation guarantees that concurrent UPDATEs on the
+    # same row serialise: one wins, the other sees no rows matching
+    # ``used_at IS NULL`` and is rejected with 409 below.
+    stmt = (
+        update(MagicLinkToken)
+        .where(
+            MagicLinkToken.token_hash == digest,
+            MagicLinkToken.used_at.is_(None),  # type: ignore[union-attr]
+        )
+        .values(used_at=now)
+    )
+    result = session.execute(stmt)
     session.commit()
-    session.refresh(row)
-    persisted_used_at = row.used_at
-    if persisted_used_at is None:
-        raise HTTPException(status_code=409, detail="token already used")
-    # SQLite returns naive datetimes after refresh while we wrote an
-    # aware one; coerce both to aware UTC before computing the delta.
-    if persisted_used_at.tzinfo is None:
-        persisted_used_at = persisted_used_at.replace(tzinfo=now.tzinfo)
-    if abs((persisted_used_at - now).total_seconds()) > 5:
+    if result.rowcount == 0:
         raise HTTPException(status_code=409, detail="token already used")
 
-    return VerifyOut(email=row.email, consumed_at=persisted_used_at.isoformat())
+    return VerifyOut(email=row.email, consumed_at=now.isoformat())
