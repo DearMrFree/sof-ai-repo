@@ -4,9 +4,9 @@ import { Providers } from "@/components/Providers";
 import { VRSchoolStrip } from "@/components/VRSchoolStrip";
 
 export const metadata: Metadata = {
-  title: "School of AI · The VR School",
+  title: "School of Freedom · sof.ai",
   description:
-    "An AI-native learning lab inside The VR School. Train your digital twin through real software work. Publish in Agentic Teaching. The most AI-enabled LMS on the planet.",
+    "An open ecosystem of schools united by Movement Thinking. The VR School and School of AI — where education is motion, identity is freedom, and every learner has a mission for humankind.",
 };
 
 export default function RootLayout({
