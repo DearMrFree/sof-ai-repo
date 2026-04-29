@@ -34,7 +34,6 @@ through the Next.js proxy.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import re
 from typing import Literal, Optional
@@ -269,6 +268,16 @@ def _upsert_user_profile(session: Session, app: PioneerApplication) -> None:
             # Lost the race — another worker created the profile first.
             # Safe to drop our insert and continue.
             session.rollback()
+        except Exception:
+            # Any other commit failure (OperationalError, connection
+            # loss, etc.) leaves the session in a "needs rollback"
+            # state; the caller's session.refresh / serialize will
+            # otherwise raise PendingRollbackError on lazy-load. Roll
+            # back here so the session is clean for whatever the
+            # caller does next, then re-raise so the caller knows the
+            # upsert didn't land.
+            session.rollback()
+            raise
         return
     # Profile already exists — only fill in genuinely empty fields so
     # we don't overwrite anything the user has already personalised.
@@ -282,7 +291,11 @@ def _upsert_user_profile(session: Session, app: PioneerApplication) -> None:
     if dirty:
         existing.updated_at = _utcnow()
         session.add(existing)
-        session.commit()
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -453,10 +466,24 @@ def patch_pioneer_application(
 
     if flipped_to_approved:
         # Same DB session — if the upsert fails we don't fail the
-        # status flip; the admin can retry the upsert from the
-        # dashboard. Surfacing the failure separately keeps the audit
-        # trail clean.
-        with contextlib.suppress(Exception):
+        # status flip itself (already persisted on line above); the
+        # admin can retry the upsert from the dashboard. We must roll
+        # back so a non-IntegrityError commit failure inside the upsert
+        # (e.g. OperationalError, lost connection) doesn't leave the
+        # session in a "needs rollback" state. If we omit the rollback,
+        # the next attribute access on `row` triggers a lazy-load
+        # SELECT that raises PendingRollbackError, and the admin gets
+        # a 500 even though the status flip was already saved.
+        try:
             _upsert_user_profile(session, row)
+        except Exception:
+            session.rollback()
+            # `row` was committed before the upsert, but its attributes
+            # may have been expired by the failed commit. Re-fetch so
+            # the response body shows the persisted state, not stale
+            # in-memory values.
+            refetched = session.get(PioneerApplication, row.id)
+            if refetched is not None:
+                row = refetched
 
     return _serialize(row)
