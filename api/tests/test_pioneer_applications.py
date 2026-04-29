@@ -18,6 +18,7 @@ from sqlmodel import select
 from sof_ai_api.db import get_session, init_db
 from sof_ai_api.main import app
 from sof_ai_api.models import UserProfile
+from sof_ai_api.routes import pioneer_applications as mod
 
 init_db()
 client = TestClient(app)
@@ -190,8 +191,6 @@ def test_approve_recovers_when_upsert_raises_non_integrity_error(monkeypatch):
         email="recovery@example.com",
         slug="recovery",
     )
-
-    from sof_ai_api.routes import pioneer_applications as mod
 
     def _exploding_upsert(*_args, **_kwargs):
         raise RuntimeError("simulated transient db failure")
