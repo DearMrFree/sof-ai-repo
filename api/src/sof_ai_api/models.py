@@ -947,3 +947,57 @@ class MagicLinkToken(SQLModel, table=True):
     used_at: Optional[datetime] = Field(default=None, index=True)
     ip_hash: str = Field(default="", max_length=128)
     user_agent: str = Field(default="", max_length=300)
+
+class PioneerApplication(SQLModel, table=True):
+    """A Pioneer's application to enter the School of Freedom.
+
+    Distinct from ``AgentApplication`` (which vets AI agents joining the
+    sof.ai ecosystem). This is a *human* applicant requesting a published
+    profile slot at ``sof.ai/<slug>`` and a Pathway assignment (Architect,
+    VR, AI). The flow is intentionally lightweight:
+
+      1. Submit at ``/apply`` — anyone, public, no auth required.
+      2. Sit in ``status="pending"`` until a steward (Freedom) reviews.
+      3. ``status="approved"`` → the row is published as a public Pioneer
+         profile under ``sof.ai/<slug>``; the email is auto-upserted into
+         ``UserProfile`` so the applicant's identity is unified across all
+         three sites.
+      4. ``status="declined"`` → record retained for audit; no public
+         surface.
+
+    The slug is reserved at submit time (unique index) so two applicants
+    can't race for the same handle. ``email`` is also unique — one human,
+    one application; if they want to revise they edit their existing row.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_pioneer_application_email"),
+        UniqueConstraint("slug", name="uq_pioneer_application_slug"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # Submission identity
+    full_name: str = Field(max_length=200)
+    email: str = Field(max_length=200, index=True)
+    # Public-facing handle. Validated client-side (lib/utils.ts:slugify on
+    # the gateway); server re-validates shape + uniqueness.
+    slug: str = Field(max_length=64, index=True)
+    # One of: "architect" | "vr" | "ai" — drives the visual treatment on
+    # the public profile and the Pathway label in the navbar. Stored as
+    # free string so adding a new pathway is a no-migration change.
+    pathway: str = Field(max_length=32, index=True)
+    # The applicant's mission — a short, opinionated sentence. Renders as
+    # the editorial pull-quote on the published profile.
+    mission_statement: str = Field(max_length=600)
+    # The longer narrative — why they're here, what they want to build.
+    personal_statement: str = Field(max_length=4000)
+    # JSON-encoded list of identity tags ("Builder", "Researcher", etc.)
+    # rendered as the gold mono chips on the published profile.
+    identity_tags_json: str = Field(default="[]")
+    # Lifecycle: pending → approved | declined.
+    status: str = Field(default="pending", index=True, max_length=16)
+    review_note: str = Field(default="", max_length=1000)
+    reviewed_by_email: str = Field(default="", max_length=200)
+    reviewed_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    updated_at: datetime = Field(default_factory=_utcnow)
