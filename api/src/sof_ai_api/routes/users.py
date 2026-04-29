@@ -562,13 +562,16 @@ def _apply_profile_edits(
         if value is not None:
             setattr(row, row_attr, value.strip()[:max_len])
 
+    # Mirror the soft 20-item cap onboarding enforces (line 370/371) so
+    # /settings can't be used to bypass it and stuff arbitrarily large
+    # arrays into goals_json / strengths_json.
     if body.goals is not None:
         row.goals_json = json.dumps(
-            [str(g).strip()[:200] for g in body.goals if str(g).strip()]
+            [str(g).strip()[:200] for g in body.goals if str(g).strip()][:20]
         )
     if body.strengths is not None:
         row.strengths_json = json.dumps(
-            [str(s).strip()[:200] for s in body.strengths if str(s).strip()]
+            [str(s).strip()[:200] for s in body.strengths if str(s).strip()][:20]
         )
     if body.twin_emoji is not None:
         row.twin_emoji = body.twin_emoji.strip()[:8] or "🤖"
