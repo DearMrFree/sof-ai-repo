@@ -44,6 +44,13 @@ function resolveNext(raw: string | null, requestUrl: string): string {
   if (!raw) return "/";
   // Allow relative paths back to the canonical site itself.
   if (raw.startsWith("/") && !raw.startsWith("//")) {
+    // Strip control chars + CR/LF that could be smuggled into the
+    // ``Location`` header (mirrors ``safeRelativeNext`` in the handoff
+    // route). Without this, a request like
+    // ``?next=/%0d%0aSet-Cookie:+evil=1`` could either crash Node's
+    // HTTP layer (preventing the cookie from being cleared) or, worst
+    // case, smuggle headers into the redirect response.
+    if (/[\u0000-\u001f]/.test(raw)) return "/";
     return raw;
   }
   try {
