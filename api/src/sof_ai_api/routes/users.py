@@ -62,6 +62,36 @@ LIST_LIMIT_MAX = 200
 # ---------------------------------------------------------------------------
 
 
+class ProfileEditIn(BaseModel):
+    """Self-edit payload for ``PATCH /users/profile``.
+
+    All fields except ``email`` (the identity key) are optional. ``None``
+    means "do not touch this field" — distinguished from "set to empty
+    string", which is a real edit (e.g. clear a tagline). Lists are the
+    same: ``None`` = no change, ``[]`` = clear.
+
+    The gateway scopes who can call this — only the signed-in owner of
+    ``email`` should be allowed to edit their own row. FastAPI trusts
+    ``X-Internal-Auth`` since the gateway has already proved identity
+    via NextAuth.
+    """
+
+    email: str = Field(max_length=200)
+    handle: Optional[str] = Field(default=None, max_length=64)
+    display_name: Optional[str] = Field(default=None, max_length=200)
+    user_type: Optional[str] = Field(default=None, max_length=32)
+    tagline: Optional[str] = Field(default=None, max_length=300)
+    location: Optional[str] = Field(default=None, max_length=200)
+    goals: Optional[list[str]] = None
+    strengths: Optional[list[str]] = None
+    first_project: Optional[str] = Field(default=None, max_length=500)
+    twin_name: Optional[str] = Field(default=None, max_length=80)
+    twin_emoji: Optional[str] = Field(default=None, max_length=8)
+    twin_persona_seed: Optional[str] = None
+    devin_session_url: Optional[str] = Field(default=None, max_length=500)
+    photo_url: Optional[str] = Field(default=None, max_length=600)
+
+
 class TouchUserIn(BaseModel):
     """Lightweight first-touch upsert for sign-in callbacks.
 
@@ -123,6 +153,7 @@ class UserProfileOut(BaseModel):
     twin_emoji: str
     twin_persona_seed: str
     devin_session_url: str
+    photo_url: str
     created_at: str
     updated_at: str
 
@@ -155,6 +186,7 @@ class UserProfileOut(BaseModel):
             twin_emoji=row.twin_emoji,
             twin_persona_seed=row.twin_persona_seed,
             devin_session_url=row.devin_session_url,
+            photo_url=getattr(row, "photo_url", "") or "",
             created_at=row.created_at.isoformat(),
             updated_at=row.updated_at.isoformat(),
         )
@@ -474,6 +506,120 @@ def touch_user(
     out = UserProfileOut.from_row(row)
     _publish_signup_event("profile.created", out)
     return out
+
+
+# Each entry: (body attribute, row attribute, max length). Applied in
+# order; None means "leave alone", any other value is .strip() + sliced
+# to ``max_len`` and written. Used by ``edit_profile`` to keep its
+# branch count manageable while still being explicit about every
+# editable field.
+_PROFILE_EDIT_STRING_FIELDS: tuple[tuple[str, str, int], ...] = (
+    ("display_name", "display_name", 200),
+    ("tagline", "tagline", 300),
+    ("location", "location", 200),
+    ("first_project", "first_project", 500),
+    ("twin_name", "twin_name", 80),
+    ("devin_session_url", "devin_session_url", 500),
+    ("photo_url", "photo_url", 600),
+)
+
+
+def _apply_handle_change(
+    session: Session, row: UserProfile, raw_handle: str
+) -> None:
+    """Apply a handle change after validating uniqueness.
+
+    Setting the handle to its current value is a no-op (not a 409).
+    """
+
+    new_handle = _normalize_handle(raw_handle)
+    if new_handle == row.handle:
+        return
+    taken = session.exec(
+        select(UserProfile).where(UserProfile.handle == new_handle)
+    ).first()
+    if taken is not None and taken.id != row.id:
+        raise HTTPException(status_code=409, detail="handle taken")
+    row.handle = new_handle
+
+
+def _apply_profile_edits(
+    session: Session, row: UserProfile, body: ProfileEditIn
+) -> None:
+    """Mutate ``row`` in place with whatever non-``None`` fields ``body`` carries."""
+
+    if body.handle is not None:
+        _apply_handle_change(session, row, body.handle)
+
+    if body.user_type is not None:
+        ut = body.user_type.strip().lower()
+        if ut not in USER_TYPES:
+            raise HTTPException(status_code=400, detail="invalid user_type")
+        row.user_type = ut
+
+    for body_attr, row_attr, max_len in _PROFILE_EDIT_STRING_FIELDS:
+        value = getattr(body, body_attr)
+        if value is not None:
+            setattr(row, row_attr, value.strip()[:max_len])
+
+    if body.goals is not None:
+        row.goals_json = json.dumps(
+            [str(g).strip()[:200] for g in body.goals if str(g).strip()]
+        )
+    if body.strengths is not None:
+        row.strengths_json = json.dumps(
+            [str(s).strip()[:200] for s in body.strengths if str(s).strip()]
+        )
+    if body.twin_emoji is not None:
+        row.twin_emoji = body.twin_emoji.strip()[:8] or "🤖"
+    if body.twin_persona_seed is not None:
+        row.twin_persona_seed = body.twin_persona_seed
+
+
+@router.patch("/profile", response_model=UserProfileOut)
+def edit_profile(
+    body: ProfileEditIn,
+    session: Session = Depends(get_session),
+    _auth: None = Depends(require_internal_auth),
+) -> UserProfileOut:
+    """Self-edit a Pioneer's profile (gateway-scoped to the owner).
+
+    The gateway routes only the signed-in user's email here, so we
+    trust ``email`` as the row to update. Each non-``None`` field on
+    the body is applied; ``None`` is "leave alone" (so callers don't
+    have to round-trip every field they aren't editing).
+
+    Validation:
+      * 404 if the email has no row (caller should ``POST /users/touch``
+        first; in practice the signIn callback already does that).
+      * 400 on invalid handle / user_type.
+      * 409 if the new handle is already taken by another row.
+
+    Routed BEFORE ``GET /{email}`` so the literal path takes priority.
+    """
+
+    email = _normalize_email(body.email)
+
+    row = session.exec(
+        select(UserProfile).where(UserProfile.email == email)
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="profile not found")
+
+    _apply_profile_edits(session, row, body)
+    row.updated_at = _utcnow()
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError as e:
+        # Belt-and-suspenders: handle uniqueness check above missed a
+        # concurrent write that landed between SELECT and COMMIT.
+        session.rollback()
+        raise HTTPException(
+            status_code=409, detail="handle taken"
+        ) from e
+    session.refresh(row)
+    return UserProfileOut.from_row(row)
 
 
 @router.get("/{email}", response_model=UserProfileOut)
