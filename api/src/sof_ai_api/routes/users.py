@@ -465,7 +465,9 @@ def touch_user(
                     status_code=409, detail="email or handle taken"
                 ) from e
             session.refresh(row)
-            return UserProfileOut.from_row(row)
+            out = UserProfileOut.from_row(row)
+            _publish_signup_event("profile.created", out)
+            return out
         return UserProfileOut.from_row(re_fetched)
 
     session.refresh(row)
