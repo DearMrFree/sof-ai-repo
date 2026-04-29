@@ -117,15 +117,55 @@ class OJSClient:
 
     def create_context(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create an OJS context (a journal). Returns the OJS response
-        including the new context's id + urlPath."""
-        return self._request("POST", "/api/v1/contexts", json=payload)
+        including the new context's id + urlPath.
+
+        OJS routes site-wide (non-context-scoped) API calls through the
+        synthetic ``/index`` path; hitting ``/api/v1/contexts`` directly
+        collides with Apache's handling of the ``api/`` subdirectory and
+        bypasses the framework bootstrap (500). ``/index/api/v1/...`` always
+        goes through the main ``index.php`` and reaches the router.
+        """
+        return self._request("POST", "/index/api/v1/contexts", json=payload)
+
+    def list_contexts(self) -> dict[str, Any]:
+        """List all OJS contexts. Mainly used by the adapter to map an
+        existing context path back to its numeric id during resync."""
+        return self._request("GET", "/index/api/v1/contexts")
 
     def create_submission(
         self, context_path: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        """Create a submission inside a given context."""
+        """Create a submission inside a given context.
+
+        OJS 3.4 rejects any POST body that tries to set ``submissionProgress``
+        (that field is managed by the workflow, not the caller), and requires
+        ``sectionId`` + ``locale``. The POST returns a near-empty submission;
+        title/abstract/authors are set on the child publication via
+        ``update_publication``.
+        """
         return self._request(
             "POST", f"/{context_path}/api/v1/submissions", json=payload
+        )
+
+    def update_publication(
+        self,
+        context_path: str,
+        submission_id: int,
+        publication_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """PUT metadata onto a publication.
+
+        OJS submissions are two-phase: ``POST /submissions`` creates an empty
+        submission with one child publication (id returned in the response),
+        then ``PUT /submissions/{sid}/publications/{pid}`` sets everything the
+        reader actually cares about — title, abstract, keywords, etc.
+        """
+        return self._request(
+            "PUT",
+            f"/{context_path}/api/v1/submissions/"
+            f"{submission_id}/publications/{publication_id}",
+            json=payload,
         )
 
     def create_review_assignment(

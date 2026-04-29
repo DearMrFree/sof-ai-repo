@@ -185,6 +185,12 @@ class Journal(SQLModel, table=True):
     # url-segment for the journal (e.g. "journal-ai").
     ojs_context_path: Optional[str] = Field(default=None, index=True)
     ojs_context_id: Optional[int] = Field(default=None)
+    # Default section inside the OJS context. OJS auto-creates an
+    # "Articles" section per context at journal-creation time but does not
+    # expose sections via REST in 3.4; the adapter discovers this id with a
+    # direct Postgres lookup once and caches it here so every subsequent
+    # mirror_article can reuse it without another DB round-trip.
+    ojs_default_section_id: Optional[int] = Field(default=None)
     ojs_synced_at: Optional[datetime] = Field(default=None)
     ojs_sync_error: Optional[str] = Field(default=None)
 
@@ -239,8 +245,13 @@ class JournalArticle(SQLModel, table=True):
     # against its starting point.
     source_url: Optional[str] = Field(default=None, max_length=2000)
     # OJS federation (Phase 2). OJS submission id is the foreign key in the
-    # real OJS database once this article has been mirrored.
+    # real OJS database once this article has been mirrored. Two-phase
+    # mirror (POST /submissions → PUT /publications) means both ids must
+    # persist: on a Phase-2 failure we resume from the PUT using the
+    # saved publication id, never re-entering Phase 1 (which would
+    # silently create a duplicate OJS submission).
     ojs_submission_id: Optional[int] = Field(default=None, index=True)
+    ojs_publication_id: Optional[int] = Field(default=None)
     ojs_synced_at: Optional[datetime] = Field(default=None)
     ojs_sync_error: Optional[str] = Field(default=None)
 

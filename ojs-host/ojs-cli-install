@@ -1,0 +1,65 @@
+#!/bin/sh
+# sof.ai drop-in replacement for pkpofficial's ojs-cli-install.
+#
+# Upstream's ojs-cli-install curls the browser install form with hard-coded
+# ``mysqli`` + ``admin/admin`` credentials. That doesn't survive first
+# contact with a real Postgres-backed deployment:
+#   * OJS strips ``postgres9`` from the driver allowlist unless the
+#     ``pgsql`` extension is loaded (fixed in Dockerfile).
+#   * The form expects ``timeZone`` and short 2-char locales (``en``, not
+#     ``en_US``) in OJS 3.4.
+#   * The install POST is called from ``ojs-pre-start``, before Apache is
+#     up, so it silently fails on a closed port.
+#
+# Instead we drive OJS's own CLI installer — ``php tools/install.php`` — which
+# reads the same params from stdin and writes config.inc.php directly. It
+# works without an HTTP hop, gives structured errors on failure, and
+# completes synchronously before we return.
+
+set -e
+
+: "${OJS_CONF:=/var/www/html/config.inc.php}"
+
+adm_user="${OJS_ADMIN_USER:-admin}"
+adm_pass="${OJS_ADMIN_PASS:-admin}"
+adm_email="${OJS_ADMIN_EMAIL:-admin@${SERVERNAME}}"
+
+echo "[sofai-ojs-install] Running php tools/install.php (admin=${adm_user})..."
+
+# Param order matches PKP\cliTool\InstallTool::readParams() / OJSInstallTool:
+#   locale, additionalLocales, filesDir,
+#   adminUsername, adminPassword, adminPassword2, adminEmail,
+#   databaseDriver, databaseHost, databaseUsername, databasePassword,
+#   databaseName, oaiRepositoryId, enableBeacon (Y/n), install? (y/N)
+#
+# Empty lines accept the default for that prompt.
+php /var/www/html/tools/install.php <<EOF
+en
+
+/var/www/files
+${adm_user}
+${adm_pass}
+${adm_pass}
+${adm_email}
+postgres9
+${OJS_DB_HOST}
+${OJS_DB_USER}
+${OJS_DB_PASSWORD}
+${OJS_DB_NAME}
+${SERVERNAME}
+N
+Y
+EOF
+
+# Installer flips installed=Off → On in config.inc.php and writes DB creds.
+if grep -q "installed = Off" "${OJS_CONF}"; then
+    echo "[sofai-ojs-install] ERROR: installer returned but installed=Off in ${OJS_CONF}" >&2
+    exit 1
+fi
+
+# The installer doesn't set ``base_url`` — default is the PKP docs URL.
+# Rewrite to our real hostname so OJS's own emitted links (emails, RSS,
+# OAI-PMH permalinks) resolve back to us.
+sed -i -e "s|^base_url = .*|base_url = \"https://${SERVERNAME}\"|" "${OJS_CONF}"
+
+echo "[sofai-ojs-install] DONE (base_url=https://${SERVERNAME})."
