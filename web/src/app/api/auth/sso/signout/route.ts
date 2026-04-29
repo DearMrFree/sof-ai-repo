@@ -41,7 +41,12 @@ const TRUSTED_NEXT_HOSTS = new Set([
 ]);
 
 function resolveNext(raw: string | null, requestUrl: string): string {
-  if (!raw) return "/";
+  // Always return an ABSOLUTE URL. ``NextResponse.redirect()`` parses
+  // its arg via ``new URL(value)`` with no base, which throws on bare
+  // relative paths like ``"/"`` (``ERR_INVALID_URL``) — that would
+  // crash the route handler before the cookie-clearing ``Set-Cookie``
+  // headers ever shipped, leaving the user signed in.
+  if (!raw) return new URL("/", requestUrl).toString();
   // Allow relative paths back to the canonical site itself.
   if (raw.startsWith("/") && !raw.startsWith("//")) {
     // Strip control chars + CR/LF that could be smuggled into the
@@ -50,8 +55,8 @@ function resolveNext(raw: string | null, requestUrl: string): string {
     // ``?next=/%0d%0aSet-Cookie:+evil=1`` could either crash Node's
     // HTTP layer (preventing the cookie from being cleared) or, worst
     // case, smuggle headers into the redirect response.
-    if (/[\u0000-\u001f]/.test(raw)) return "/";
-    return raw;
+    if (/[\u0000-\u001f]/.test(raw)) return new URL("/", requestUrl).toString();
+    return new URL(raw, requestUrl).toString();
   }
   try {
     const u = new URL(raw);
