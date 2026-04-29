@@ -430,6 +430,26 @@ def test_edit_profile_persists_photo_url() -> None:
     assert fetched["photo_url"] == photo
 
 
+def test_edit_profile_caps_lists_at_20_items() -> None:
+    """Mirror the onboarding 20-item soft cap so /settings can't be used
+    to stuff arbitrarily long arrays into goals_json / strengths_json.
+    """
+
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+
+    too_many = [f"goal-{i}" for i in range(50)]
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "goals": too_many},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["goals"]) == 20
+    assert body["goals"][0] == "goal-0"
+    assert body["goals"][-1] == "goal-19"
+
+
 def test_edit_profile_lists_can_replace_and_clear() -> None:
     client.post("/users/onboarding", headers=AUTH, json=_payload())
 
