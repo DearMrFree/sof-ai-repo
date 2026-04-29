@@ -45,6 +45,10 @@ _ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # ``journalarticle`` exists on every deployed DB so create_all will
     # not add this column; backfilled rows stay NULL (no source URL).
     ("journalarticle", "source_url", "VARCHAR"),
+    # Branch 5 — /settings editor + profile photo upload. ``userprofile``
+    # exists on every deployed DB so create_all will not add this column;
+    # default '' so existing rows render with the initials placeholder.
+    ("userprofile", "photo_url", "VARCHAR DEFAULT ''"),
 )
 
 

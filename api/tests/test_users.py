@@ -312,6 +312,152 @@ def test_touch_handles_collision_with_numeric_suffix() -> None:
     assert body["handle"].startswith("ada-")
 
 
+# ---------------------------------------------------------------------------
+# PATCH /users/profile — self-edit
+# ---------------------------------------------------------------------------
+
+
+def test_edit_profile_updates_only_provided_fields() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={
+            "email": "ada@example.com",
+            "display_name": "Augusta Ada King",
+            "tagline": "Countess of Lovelace",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["display_name"] == "Augusta Ada King"
+    assert body["tagline"] == "Countess of Lovelace"
+    # Untouched fields stay put.
+    assert body["handle"] == "ada"
+    assert body["user_type"] == "student"
+    assert body["goals"] == ["Ship my first AI app", "Pair with Devin daily"]
+
+
+def test_edit_profile_can_clear_strings_with_empty_string() -> None:
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(tagline="initially set"),
+    )
+
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "tagline": ""},
+    )
+    assert res.status_code == 200
+    assert res.json()["tagline"] == ""
+
+
+def test_edit_profile_handle_collision_returns_409() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(email="grace@example.com", handle="grace"),
+    )
+
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "handle": "grace"},
+    )
+    assert res.status_code == 409
+
+
+def test_edit_profile_keeping_own_handle_is_a_noop_not_a_409() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "handle": "ada", "tagline": "edit"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["handle"] == "ada"
+    assert res.json()["tagline"] == "edit"
+
+
+def test_edit_profile_invalid_user_type_returns_400() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "user_type": "wizard"},
+    )
+    assert res.status_code == 400
+
+
+def test_edit_profile_unknown_email_returns_404() -> None:
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ghost@example.com", "tagline": "boo"},
+    )
+    assert res.status_code == 404
+
+
+def test_edit_profile_requires_internal_auth() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+    res = client.patch(
+        "/users/profile",
+        json={"email": "ada@example.com", "tagline": "no auth"},
+    )
+    assert res.status_code in (401, 403)
+
+
+def test_edit_profile_persists_photo_url() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+
+    photo = "https://abcd.public.blob.vercel-storage.com/avatars/ada-xyz.png"
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "photo_url": photo},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["photo_url"] == photo
+
+    # Re-fetch via GET — the value round-trips.
+    fetched = client.get("/users/ada@example.com").json()
+    assert fetched["photo_url"] == photo
+
+
+def test_edit_profile_lists_can_replace_and_clear() -> None:
+    client.post("/users/onboarding", headers=AUTH, json=_payload())
+
+    # Replace.
+    res = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={
+            "email": "ada@example.com",
+            "goals": ["Teach the world to code", "Write a compiler"],
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["goals"] == [
+        "Teach the world to code",
+        "Write a compiler",
+    ]
+
+    # Clear with [].
+    res2 = client.patch(
+        "/users/profile",
+        headers=AUTH,
+        json={"email": "ada@example.com", "goals": []},
+    )
+    assert res2.status_code == 200
+    assert res2.json()["goals"] == []
+
+
 def test_search_escapes_like_wildcards() -> None:
     """Regression for Devin Review #38 — the ``q`` search param was
     interpolated into a LIKE pattern without escaping ``%``/``_``, so

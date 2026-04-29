@@ -890,6 +890,10 @@ class UserProfile(SQLModel, table=True):
     # Optional. Stored when the user pastes a Devin session URL so their
     # profile shows "Continue in Devin →".
     devin_session_url: str = Field(default="", max_length=500)
+    # Optional avatar URL. Populated by /settings via Vercel Blob upload.
+    # Vercel Blob URLs include a long random suffix (300+ chars worst
+    # case); cap generously so future hosts (S3, R2, etc.) also fit.
+    photo_url: str = Field(default="", max_length=600)
     created_at: datetime = Field(
         default_factory=_utcnow, sa_column_kwargs={"server_default": text("CURRENT_TIMESTAMP")}
     )
