@@ -143,7 +143,14 @@ class PioneerProfileOut(BaseModel):
 def _validate_slug(raw: str) -> str:
     s = raw.strip().lower()
     if not SLUG_RE.match(s):
-        raise HTTPException(status_code=422, detail="slug must match ^[a-z0-9-]+$")
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "slug must be lowercase alphanumeric, optionally separated by "
+                "single hyphens (e.g. 'my-slug'); leading, trailing, or "
+                "consecutive hyphens are not allowed"
+            ),
+        )
     if len(s) < 2 or len(s) > SLUG_MAX_LEN:
         raise HTTPException(
             status_code=422,
