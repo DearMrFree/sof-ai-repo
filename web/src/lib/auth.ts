@@ -4,6 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 
 import { displayNameFromEmail, generatePersona } from "./personaGen";
 import { verifyMagicLinkToken } from "./auth/magicLink";
+import { touchUserOnSignIn } from "./users/touch";
 
 const hasGoogle =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
@@ -147,6 +148,20 @@ export const authOptions: NextAuthOptions = {
     signIn: "/signin",
   },
   callbacks: {
+    // Best-effort: every successful sign-in upserts the shared
+    // FastAPI ``UserProfile`` row so identity is unified across
+    // sof.ai · www.thevrschool.org · ai.thevrschool.org. Returning
+    // ``true`` unconditionally — failures are logged inside the helper
+    // because sign-in must not break if the shared store is briefly
+    // unreachable.
+    async signIn({ user }) {
+      await touchUserOnSignIn({
+        email: user.email ?? "",
+        name: user.name ?? null,
+        image: user.image ?? null,
+      });
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.uid = user.id;

@@ -1,0 +1,99 @@
+/**
+ * GET /api/auth/sso/signout
+ *
+ * Sign-out fan-out for the canonical auth surface. Sister sites on
+ * other TLDs redirect users here after clearing their own cookie so
+ * that signing out anywhere clears the session everywhere.
+ *
+ * What this clears:
+ *   - The ``__Secure-next-auth.session-token`` cookie on
+ *     ``ai.thevrschool.org``. When ``NEXTAUTH_COOKIE_DOMAIN=.thevrschool.org``
+ *     is set in prod (it is), the cookie is shared with the apex
+ *     ``www.thevrschool.org`` and clearing it here logs the user out
+ *     of both subdomains in one shot.
+ *
+ * Query string:
+ *   ?next=https://sof.ai/   (optional; absolute URL or relative path)
+ *
+ * Why GET, not POST:
+ *   This is reachable from a sister-domain redirect chain, so it has
+ *   to work with a browser navigating directly here. NextAuth's
+ *   built-in ``/api/auth/signout`` is POST-only with CSRF — fine for
+ *   in-app sign-outs, awkward for cross-TLD chains. We just delete
+ *   the session cookie ourselves.
+ */
+import { NextResponse, type NextRequest } from "next/server";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// Same trust list as the handoff route — only these hosts can be a
+// post-signout ``next`` target so a malicious link can't redirect
+// users into a phishing page after signing them out.
+const TRUSTED_NEXT_HOSTS = new Set([
+  "sof.ai",
+  "www.sof.ai",
+  "ai.thevrschool.org",
+  "www.thevrschool.org",
+  "thevrschool.org",
+  "localhost:3000",
+  "localhost:3001",
+]);
+
+function resolveNext(raw: string | null, requestUrl: string): string {
+  if (!raw) return "/";
+  // Allow relative paths back to the canonical site itself.
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    return raw;
+  }
+  try {
+    const u = new URL(raw);
+    const host = u.host.toLowerCase();
+    if (TRUSTED_NEXT_HOSTS.has(host)) {
+      return u.toString();
+    }
+  } catch {
+    /* fall through */
+  }
+  // Untrusted target → bounce back to ourselves.
+  return new URL("/", requestUrl).toString();
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const next = resolveNext(url.searchParams.get("next"), req.url);
+
+  const useSecure =
+    (process.env.NEXTAUTH_URL ?? "").startsWith("https://") ||
+    process.env.NODE_ENV === "production";
+  const cookieName = useSecure
+    ? "__Secure-next-auth.session-token"
+    : "next-auth.session-token";
+  const cookieDomain = process.env.NEXTAUTH_COOKIE_DOMAIN || undefined;
+
+  const res = NextResponse.redirect(next);
+  // Clearing means setting maxAge=0 with the SAME attributes the
+  // cookie was minted with — particularly the ``Domain``. Without
+  // a matching domain, the browser keeps the original cookie.
+  res.cookies.set(cookieName, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: useSecure,
+    maxAge: 0,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  });
+  // Also clear the chunked variants NextAuth uses when the JWT grows
+  // beyond ~4KB (rare but real on rich profiles).
+  for (const suffix of [".0", ".1", ".2"]) {
+    res.cookies.set(cookieName + suffix, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: useSecure,
+      maxAge: 0,
+      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    });
+  }
+  return res;
+}
