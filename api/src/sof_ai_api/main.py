@@ -14,6 +14,7 @@ from .routes import (
     enrollments,
     health,
     journals,
+    pioneer_applications,
     progress,
     twins,
     users,
@@ -70,6 +71,7 @@ app.include_router(wallet.router)
 app.include_router(journals.router)
 app.include_router(articles.router)
 app.include_router(applications.router)
+app.include_router(pioneer_applications.router)
 app.include_router(enrollments.router)
 app.include_router(embed.router)
 app.include_router(users.router)
