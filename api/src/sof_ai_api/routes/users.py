@@ -62,6 +62,27 @@ LIST_LIMIT_MAX = 200
 # ---------------------------------------------------------------------------
 
 
+class TouchUserIn(BaseModel):
+    """Lightweight first-touch upsert for sign-in callbacks.
+
+    Used when a Pioneer signs in to one of the sister sites (sof.ai,
+    ai.thevrschool.org, www.thevrschool.org) and we need to ensure a
+    ``UserProfile`` row exists keyed on their email — even if they
+    haven't completed the onboarding wizard yet. Identity is unified
+    by email; the wizard fills in the rest later.
+
+    Idempotent: if a row already exists, this is a no-op (we never
+    clobber an existing handle or display name).
+    """
+
+    email: str = Field(max_length=200)
+    display_name: str = Field(default="", max_length=200)
+    # Optional informational tag — which surface the user signed in
+    # from. Stored nowhere right now; reserved so future analytics /
+    # onboarding journeys can pick it up without changing the contract.
+    source: str = Field(default="", max_length=64)
+
+
 class OnboardingIn(BaseModel):
     """The 6 wizard answers + identity fields.
 
@@ -168,6 +189,68 @@ def _normalize_handle(handle: str) -> str:
     if not safe or len(safe) > 64:
         raise HTTPException(status_code=400, detail="invalid handle")
     return safe
+
+
+def _derive_handle_from_email(email: str) -> str:
+    """Generate a URL-safe handle from an email's local part.
+
+    Used by ``/users/touch`` when no handle has been picked yet — keeps
+    the handle space predictable + readable while staying within the
+    ASCII alphanumeric + ``.`` ``_`` ``-`` allowlist already enforced
+    by ``_normalize_handle``. Empty / all-illegal local parts fall
+    back to ``"member"`` so we never produce an invalid handle.
+    """
+
+    local = (email or "").split("@", 1)[0].strip().lstrip("@").lower()
+    safe = "".join(
+        c for c in local if (c.isascii() and c.isalnum()) or c in "._-"
+    )
+    if not safe:
+        return "member"
+    return safe[:64]
+
+
+def _display_name_from_email(email: str) -> str:
+    """Best-effort human display name from an email's local part.
+
+    `freedom@thevrschool.org` -> `Freedom`
+    `dr.j.smith@example.com` -> `Dr J Smith`
+    Falls back to the bare local part if nothing better can be derived.
+    """
+
+    local = (email or "").split("@", 1)[0]
+    if not local:
+        return "Pioneer"
+    parts = [p for p in local.replace("_", " ").replace(".", " ").split() if p]
+    if not parts:
+        return local[:200]
+    return " ".join(p.capitalize() for p in parts)[:200]
+
+
+def _unique_handle(session: Session, base: str) -> str:
+    """Return ``base`` if free, else append ``-1``, ``-2``, … until free.
+
+    Caller must hold a session — the unique constraint on
+    ``UserProfile.handle`` is the source of truth, but this gives us
+    a friendlier handle without requiring the caller to retry.
+    """
+
+    candidate = base
+    suffix = 0
+    while True:
+        taken = session.exec(
+            select(UserProfile).where(UserProfile.handle == candidate)
+        ).first()
+        if taken is None:
+            return candidate
+        suffix += 1
+        candidate = f"{base}-{suffix}"
+        # Be paranoid about runaway suffixes (handle is max_length=64).
+        if suffix > 999 or len(candidate) > 64:
+            # Truncate base aggressively so we always fit. Worst case
+            # the IntegrityError will surface to the caller.
+            candidate = f"{base[:48]}-{suffix}"
+            return candidate
 
 
 def _validate_user_type(user_type: str) -> str:
@@ -301,6 +384,90 @@ def upsert_onboarding(
     except IntegrityError as e:
         session.rollback()
         raise HTTPException(status_code=409, detail="email or handle taken") from e
+    session.refresh(row)
+    out = UserProfileOut.from_row(row)
+    _publish_signup_event("profile.created", out)
+    return out
+
+
+@router.post("/touch", response_model=UserProfileOut)
+def touch_user(
+    body: TouchUserIn,
+    session: Session = Depends(get_session),
+    _auth: None = Depends(require_internal_auth),
+) -> UserProfileOut:
+    """Idempotent first-touch upsert keyed on email.
+
+    Called by the sister sites' NextAuth callbacks the first time a
+    visitor signs in, so a ``UserProfile`` row exists across all
+    three TLDs as soon as identity is established. If a row already
+    exists, returns it unchanged — never clobbers a handle, display
+    name, or any onboarding fields the user has already personalised.
+
+    A new row is created with:
+      * ``handle`` derived from the email local part (collision-safe)
+      * ``display_name`` from the body or derived from the email
+      * ``user_type`` defaulted to ``"student"`` (the most common case;
+        the user can change it later from /welcome or /settings)
+      * everything else left at column defaults
+
+    Routed BEFORE ``/{email}`` so the literal path takes priority over
+    the catch-all email parameter.
+    """
+
+    email = _normalize_email(body.email)
+
+    existing = session.exec(
+        select(UserProfile).where(UserProfile.email == email)
+    ).first()
+    if existing is not None:
+        return UserProfileOut.from_row(existing)
+
+    base_handle = _derive_handle_from_email(email)
+    handle = _unique_handle(session, base_handle)
+    display_name = (
+        body.display_name.strip()[:200] if body.display_name else ""
+    ) or _display_name_from_email(email)
+
+    row = UserProfile(
+        email=email,
+        handle=handle,
+        display_name=display_name,
+        user_type="student",
+    )
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Race: another worker upserted the same email/handle between
+        # our SELECT and our INSERT. Roll back, re-fetch, and return
+        # whatever's now persisted (idempotent contract).
+        session.rollback()
+        re_fetched = session.exec(
+            select(UserProfile).where(UserProfile.email == email)
+        ).first()
+        if re_fetched is None:
+            # Someone else took the handle, not the email. Try once
+            # more with a numeric suffix to dodge the collision.
+            handle = _unique_handle(session, base_handle)
+            row = UserProfile(
+                email=email,
+                handle=handle,
+                display_name=display_name,
+                user_type="student",
+            )
+            session.add(row)
+            try:
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409, detail="email or handle taken"
+                ) from e
+            session.refresh(row)
+            return UserProfileOut.from_row(row)
+        return UserProfileOut.from_row(re_fetched)
+
     session.refresh(row)
     out = UserProfileOut.from_row(row)
     _publish_signup_event("profile.created", out)

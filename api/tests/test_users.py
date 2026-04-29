@@ -197,6 +197,121 @@ def test_admin_recent_requires_internal_auth() -> None:
     assert res.status_code in (401, 403)
 
 
+# ---------------------------------------------------------------------------
+# /users/touch — sign-in upsert
+# ---------------------------------------------------------------------------
+
+
+def test_touch_creates_minimal_profile() -> None:
+    res = client.post(
+        "/users/touch",
+        headers=AUTH,
+        json={"email": "Ada.Lovelace@example.com", "display_name": "Ada Lovelace"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    # Email lowercased, handle derived from local part, default user_type.
+    assert body["email"] == "ada.lovelace@example.com"
+    assert body["handle"] == "ada.lovelace"
+    assert body["display_name"] == "Ada Lovelace"
+    assert body["user_type"] == "student"
+    # Empty fields default sensibly.
+    assert body["tagline"] == ""
+    assert body["goals"] == []
+    assert body["strengths"] == []
+
+
+def test_touch_is_idempotent_and_does_not_clobber() -> None:
+    # First touch creates the row.
+    res1 = client.post(
+        "/users/touch",
+        headers=AUTH,
+        json={"email": "grace@example.com", "display_name": "Grace Hopper"},
+    )
+    first = res1.json()
+    assert first["display_name"] == "Grace Hopper"
+
+    # User completes the wizard, picks a custom handle + tagline.
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(
+            email="grace@example.com",
+            handle="amazing-grace",
+            display_name="Rear Admiral Grace Hopper",
+            user_type="founder",
+            tagline="Wrote the first compiler.",
+        ),
+    )
+
+    # Second touch (e.g. user signs in again) must NOT clobber the
+    # personalised handle / display_name / user_type / tagline.
+    res2 = client.post(
+        "/users/touch",
+        headers=AUTH,
+        json={"email": "grace@example.com", "display_name": "Should Not Win"},
+    )
+    assert res2.status_code == 200
+    second = res2.json()
+    assert second["id"] == first["id"]
+    assert second["handle"] == "amazing-grace"
+    assert second["display_name"] == "Rear Admiral Grace Hopper"
+    assert second["user_type"] == "founder"
+    assert second["tagline"] == "Wrote the first compiler."
+
+
+def test_touch_requires_internal_auth() -> None:
+    res = client.post(
+        "/users/touch",
+        json={"email": "no-auth@example.com"},
+    )
+    assert res.status_code in (401, 403)
+
+
+def test_touch_invalid_email_returns_400() -> None:
+    res = client.post(
+        "/users/touch",
+        headers=AUTH,
+        json={"email": "not-an-email"},
+    )
+    assert res.status_code == 400
+
+
+def test_touch_falls_back_to_email_derived_display_name() -> None:
+    res = client.post(
+        "/users/touch",
+        headers=AUTH,
+        json={"email": "dr.j.smith@example.com"},
+    )
+    body = res.json()
+    # No display_name in body → derived "Dr J Smith" from local part.
+    assert body["display_name"] == "Dr J Smith"
+    assert body["handle"] == "dr.j.smith"
+
+
+def test_touch_handles_collision_with_numeric_suffix() -> None:
+    # Pre-claim the handle "ada" via the wizard.
+    client.post(
+        "/users/onboarding",
+        headers=AUTH,
+        json=_payload(email="other@example.com", handle="ada"),
+    )
+
+    # Now ada@example.com signs in for the first time. Their email
+    # local part collides with the existing "ada" handle, so /touch
+    # should auto-suffix.
+    res = client.post(
+        "/users/touch",
+        headers=AUTH,
+        json={"email": "ada@example.com"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["email"] == "ada@example.com"
+    assert body["handle"] != "ada"
+    assert body["handle"].startswith("ada-")
+
+
 def test_search_escapes_like_wildcards() -> None:
     """Regression for Devin Review #38 — the ``q`` search param was
     interpolated into a LIKE pattern without escaping ``%``/``_``, so
