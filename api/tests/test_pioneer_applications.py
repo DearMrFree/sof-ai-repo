@@ -18,6 +18,7 @@ from sqlmodel import select
 from sof_ai_api.db import get_session, init_db
 from sof_ai_api.main import app
 from sof_ai_api.models import UserProfile
+from sof_ai_api.routes import pioneer_applications as mod
 
 init_db()
 client = TestClient(app)
@@ -173,6 +174,39 @@ def test_re_approving_does_not_duplicate_user_profile():
             select(UserProfile).where(UserProfile.email == "ivy@example.com")
         ).all()
     assert len(rows) == 1
+
+
+def test_approve_recovers_when_upsert_raises_non_integrity_error(monkeypatch):
+    """Regression for Devin Review #BUG_..._0001 (PR #50 follow-up).
+
+    If `_upsert_user_profile` raises a non-IntegrityError commit failure
+    (OperationalError, lost connection, etc.) the PATCH route must
+    rollback the session, recover, and still return 200 with the
+    persisted application — the status flip itself was committed before
+    the upsert, so a 500 here would mislead the admin into thinking
+    nothing was saved when in reality the row is already approved.
+    """
+    submitted = _submit(
+        full_name="Recovery R",
+        email="recovery@example.com",
+        slug="recovery",
+    )
+
+    def _exploding_upsert(*_args, **_kwargs):
+        raise RuntimeError("simulated transient db failure")
+
+    monkeypatch.setattr(mod, "_upsert_user_profile", _exploding_upsert)
+
+    r = client.patch(
+        f"/pioneer-applications/{submitted['id']}",
+        json={"status": "approved"},
+    )
+    # The status flip itself succeeded; the upsert failure is recovered
+    # by the PATCH handler. No 500.
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "approved"
+    assert body["slug"] == "recovery"
 
 
 def test_admin_list_filter_by_status():
