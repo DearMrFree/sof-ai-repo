@@ -52,7 +52,11 @@ function safeRelativeNext(raw: string | null): string {
   // Only accept a relative path on the sister site. Anything else
   // (absolute URLs, ``//evil.com``, schemes) becomes ``/``.
   if (!raw) return "/";
-  if (!raw.startsWith("/") || raw.startsWith("//")) return "/";
+  // Reject ``//`` (protocol-relative) AND ``/\`` — the WHATWG URL parser
+  // normalises backslashes to forward slashes for http/https schemes,
+  // so the sister site resolving ``/\\evil.com`` lands on
+  // ``https://evil.com``. Both schemes are open-redirect smuggling.
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
   // Strip control chars + CR/LF that could be smuggled into headers.
   if (/[\u0000-\u001f]/.test(raw)) return "/";
   return raw;

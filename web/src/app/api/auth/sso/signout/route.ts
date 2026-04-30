@@ -48,7 +48,10 @@ function resolveNext(raw: string | null, requestUrl: string): string {
   // headers ever shipped, leaving the user signed in.
   if (!raw) return new URL("/", requestUrl).toString();
   // Allow relative paths back to the canonical site itself.
-  if (raw.startsWith("/") && !raw.startsWith("//")) {
+  // Reject ``//`` (protocol-relative) AND ``/\`` (WHATWG URL parser
+  // normalises backslashes to forward slashes for http/https schemes,
+  // so ``/\\evil.com`` resolves to ``https://evil.com/`` — open redirect).
+  if (raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\")) {
     // Strip control chars + CR/LF that could be smuggled into the
     // ``Location`` header (mirrors ``safeRelativeNext`` in the handoff
     // route). Without this, a request like
