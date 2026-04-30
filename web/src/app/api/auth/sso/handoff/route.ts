@@ -113,8 +113,12 @@ export async function GET(req: NextRequest) {
       image: session?.user?.image ?? null,
     });
   } catch (err) {
+    // Don't leak ``NEXTAUTH_SECRET is required …`` (or any other
+    // node:crypto / config detail) to the browser — the endpoint is
+    // reachable by any visitor with a trusted ``?domain=`` value.
+    console.error("mintBridgeToken failed:", err);
     return NextResponse.json(
-      { error: "could not mint bridge token", detail: String(err) },
+      { error: "could not mint bridge token" },
       { status: 500 },
     );
   }

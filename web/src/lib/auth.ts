@@ -155,11 +155,22 @@ export const authOptions: NextAuthOptions = {
     // because sign-in must not break if the shared store is briefly
     // unreachable.
     async signIn({ user }) {
-      await touchUserOnSignIn({
-        email: user.email ?? "",
-        name: user.name ?? null,
-        image: user.image ?? null,
-      });
+      // Belt-and-braces: ``touchUserOnSignIn`` is internally guarded
+      // already, but a future change to it (or its transitive deps)
+      // could throw before that try/catch is reached. NextAuth v4
+      // treats a throwing ``signIn`` callback as a denied sign-in and
+      // bounces to the error page — i.e. the entire auth surface goes
+      // dark if the shared touch helper ever regresses. Wrap here so
+      // ``return true`` is genuinely unconditional.
+      try {
+        await touchUserOnSignIn({
+          email: user.email ?? "",
+          name: user.name ?? null,
+          image: user.image ?? null,
+        });
+      } catch (err) {
+        console.warn("touchUserOnSignIn threw unexpectedly:", err);
+      }
       return true;
     },
     async jwt({ token, user }) {
