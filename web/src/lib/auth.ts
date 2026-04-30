@@ -4,6 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 
 import { displayNameFromEmail, generatePersona } from "./personaGen";
 import { verifyMagicLinkToken } from "./auth/magicLink";
+import { touchUserOnSignIn } from "./users/touch";
 
 const hasGoogle =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
@@ -147,6 +148,31 @@ export const authOptions: NextAuthOptions = {
     signIn: "/signin",
   },
   callbacks: {
+    // Best-effort: every successful sign-in upserts the shared
+    // FastAPI ``UserProfile`` row so identity is unified across
+    // sof.ai · www.thevrschool.org · ai.thevrschool.org. Returning
+    // ``true`` unconditionally — failures are logged inside the helper
+    // because sign-in must not break if the shared store is briefly
+    // unreachable.
+    async signIn({ user }) {
+      // Belt-and-braces: ``touchUserOnSignIn`` is internally guarded
+      // already, but a future change to it (or its transitive deps)
+      // could throw before that try/catch is reached. NextAuth v4
+      // treats a throwing ``signIn`` callback as a denied sign-in and
+      // bounces to the error page — i.e. the entire auth surface goes
+      // dark if the shared touch helper ever regresses. Wrap here so
+      // ``return true`` is genuinely unconditional.
+      try {
+        await touchUserOnSignIn({
+          email: user.email ?? "",
+          name: user.name ?? null,
+          image: user.image ?? null,
+        });
+      } catch (err) {
+        console.warn("touchUserOnSignIn threw unexpectedly:", err);
+      }
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.uid = user.id;
