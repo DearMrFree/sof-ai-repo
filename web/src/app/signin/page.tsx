@@ -41,6 +41,10 @@ function SignInInner() {
   // user's profile if they've already completed onboarding, so this is
   // safe for repeat sign-ins too.
   const callbackUrl = search.get("callbackUrl") || "/welcome";
+  const isSofAiBridge = useMemo(
+    () => isSofAiBridgeCallback(callbackUrl),
+    [callbackUrl],
+  );
 
   // --- State for the email fallback path.
   const [emailOpen, setEmailOpen] = useState(false);
@@ -48,7 +52,9 @@ function SignInInner() {
   const [emailLoading, setEmailLoading] = useState(false);
   const [magicSent, setMagicSent] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    friendlyError(search.get("error")),
+  );
 
   // --- Live persona preview. Keyed by `seed` so the user can "reroll".
   const [seed, setSeed] = useState<string>(() => cryptoSeed());
@@ -149,59 +155,70 @@ function SignInInner() {
               </span>
             </h1>
             <p className="mt-4 max-w-md text-sm text-zinc-400 sm:text-base">
-              Zero forms. Zero passwords. Your identity, profile, and first
-              study room are one click away — agents are already inside.
+              {isSofAiBridge
+                ? "Use Google or email once to connect your sof.ai profile with School of AI. Guest sessions stay local to one site."
+                : "Zero forms. Zero passwords. Your identity, profile, and first study room are one click away — agents are already inside."}
             </p>
 
             {/* Agents presence strip */}
             <AgentsInside />
 
             <div className="mt-8 max-w-md space-y-3">
-              {/* PRIMARY — one click guest entry */}
-              <button
-                onClick={handleGuest}
-                disabled={guestLoading || emailLoading}
-                className="group relative flex w-full items-center justify-between gap-3 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-5 py-4 text-left text-white shadow-[0_20px_60px_-20px] shadow-fuchsia-500/50 transition hover:brightness-110 disabled:opacity-60"
-              >
-                <span className="flex items-center gap-3">
-                  <span
-                    className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl ring-2 ring-white/30"
-                    style={{
-                      backgroundImage: `linear-gradient(135deg, ${persona.avatarGradient[0]}, ${persona.avatarGradient[1]})`,
-                    }}
-                    aria-hidden="true"
+              {isSofAiBridge ? (
+                <div className="rounded-2xl border border-indigo-400/25 bg-indigo-400/10 px-4 py-3 text-sm text-indigo-100">
+                  Guest mode is great for a quick look around, but sof.ai
+                  profiles need a real email so your portfolio, settings, and
+                  school progress stay connected.
+                </div>
+              ) : (
+                <>
+                  {/* PRIMARY — one click guest entry */}
+                  <button
+                    onClick={handleGuest}
+                    disabled={guestLoading || emailLoading}
+                    className="group relative flex w-full items-center justify-between gap-3 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-5 py-4 text-left text-white shadow-[0_20px_60px_-20px] shadow-fuchsia-500/50 transition hover:brightness-110 disabled:opacity-60"
                   >
-                    {persona.emoji}
-                  </span>
-                  <span className="flex flex-col">
-                    <span className="text-base font-semibold">
-                      {guestLoading ? "Entering the classroom…" : "Jump in"}
+                    <span className="flex items-center gap-3">
+                      <span
+                        className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl ring-2 ring-white/30"
+                        style={{
+                          backgroundImage: `linear-gradient(135deg, ${persona.avatarGradient[0]}, ${persona.avatarGradient[1]})`,
+                        }}
+                        aria-hidden="true"
+                      >
+                        {persona.emoji}
+                      </span>
+                      <span className="flex flex-col">
+                        <span className="text-base font-semibold">
+                          {guestLoading ? "Entering the classroom…" : "Jump in"}
+                        </span>
+                        <span className="text-xs text-white/80">
+                          You&apos;ll be{" "}
+                          <span className="font-medium">@{persona.handle}</span> ·
+                          one click, no form
+                        </span>
+                      </span>
                     </span>
-                    <span className="text-xs text-white/80">
-                      You&apos;ll be{" "}
-                      <span className="font-medium">@{persona.handle}</span> ·
-                      one click, no form
+                    <ArrowRight className="h-5 w-5 transition group-hover:translate-x-0.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSeed(cryptoSeed())}
+                    className="inline-flex items-center gap-1.5 text-xs text-zinc-400 transition hover:text-white"
+                  >
+                    <Dices className="h-3.5 w-3.5" />
+                    Re-roll persona
+                  </button>
+
+                  <div className="relative py-3 text-center">
+                    <span className="relative z-10 bg-zinc-950 px-3 text-[11px] uppercase tracking-wider text-zinc-500">
+                      Or keep your identity
                     </span>
-                  </span>
-                </span>
-                <ArrowRight className="h-5 w-5 transition group-hover:translate-x-0.5" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSeed(cryptoSeed())}
-                className="inline-flex items-center gap-1.5 text-xs text-zinc-400 transition hover:text-white"
-              >
-                <Dices className="h-3.5 w-3.5" />
-                Re-roll persona
-              </button>
-
-              <div className="relative py-3 text-center">
-                <span className="relative z-10 bg-zinc-950 px-3 text-[11px] uppercase tracking-wider text-zinc-500">
-                  Or keep your identity
-                </span>
-                <div className="absolute left-0 top-1/2 -z-0 h-px w-full bg-zinc-800" />
-              </div>
+                    <div className="absolute left-0 top-1/2 -z-0 h-px w-full bg-zinc-800" />
+                  </div>
+                </>
+              )}
 
               {/* Google */}
               <button
@@ -459,4 +476,24 @@ function cryptoSeed(): string {
     return window.crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random()}`;
+}
+
+function isSofAiBridgeCallback(callbackUrl: string): boolean {
+  try {
+    const url = new URL(callbackUrl, "https://ai.thevrschool.org");
+    const domain = (url.searchParams.get("domain") ?? "").toLowerCase();
+    return (
+      url.pathname === "/api/auth/sso/handoff" &&
+      (domain === "sof.ai" || domain === "www.sof.ai")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function friendlyError(code: string | null): string | null {
+  if (code === "GuestBridgeRequiresEmail") {
+    return "Guest sessions stay local. Use Google or an email link once to connect sof.ai with your School of AI profile.";
+  }
+  return null;
 }

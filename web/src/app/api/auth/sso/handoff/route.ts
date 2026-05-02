@@ -70,6 +70,20 @@ function canonicalIssuer(req: NextRequest): string {
   return new URL(req.url).origin;
 }
 
+function buildBackUrl(req: NextRequest, domain: string, next: string): URL {
+  const back = new URL("/api/auth/sso/handoff", req.url);
+  back.searchParams.set("domain", domain);
+  if (next !== "/") back.searchParams.set("next", next);
+  return back;
+}
+
+function buildSigninUrl(req: NextRequest, callbackUrl: URL, error?: string): URL {
+  const signin = new URL("/signin", req.url);
+  signin.searchParams.set("callbackUrl", callbackUrl.toString());
+  if (error) signin.searchParams.set("error", error);
+  return signin;
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const domain = (url.searchParams.get("domain") ?? "").toLowerCase().trim();
@@ -90,21 +104,24 @@ export async function GET(req: NextRequest) {
     // second visit. Encoding the same handoff URL as ``callbackUrl``
     // is intentional — that's the only param /signin honours and it
     // keeps the round-trip transparent.
-    const back = new URL("/api/auth/sso/handoff", req.url);
-    back.searchParams.set("domain", domain);
-    if (next !== "/") back.searchParams.set("next", next);
-    const signin = new URL("/signin", req.url);
-    signin.searchParams.set("callbackUrl", back.toString());
-    return NextResponse.redirect(signin);
+    return NextResponse.redirect(
+      buildSigninUrl(req, buildBackUrl(req, domain, next)),
+    );
   }
 
   if (email.endsWith("@guest.sof.ai")) {
-    // Don't extend ephemeral guest identities across TLDs. The sister
-    // site can render a clearer prompt than NextAuth's default error.
-    return NextResponse.json(
-      { error: "guest identity not bridgeable; sign in with a real email" },
-      { status: 400 },
+    // Don't extend ephemeral guest identities across TLDs. Clear the
+    // canonical guest cookie and send the visitor to the real sign-in
+    // surface, preserving the original bridge callback so Google/email
+    // still completes the sof.ai handoff automatically.
+    const signin = buildSigninUrl(
+      req,
+      buildBackUrl(req, domain, next),
+      "GuestBridgeRequiresEmail",
     );
+    const signout = new URL("/api/auth/sso/signout", req.url);
+    signout.searchParams.set("next", signin.toString());
+    return NextResponse.redirect(signout);
   }
 
   let token: string;
