@@ -41,6 +41,9 @@ export const dynamic = "force-dynamic";
 const TRUSTED_SISTER_HOSTS = new Set([
   "sof.ai",
   "www.sof.ai",
+  // iTeachXR — unified login gateway for the LMS platform.
+  "iteachxr.com",
+  "www.iteachxr.com",
   // Localhost for end-to-end testing of the sister site against this
   // canonical surface. Strict port-match keeps it safe; arbitrary
   // localhost ports won't resolve.
