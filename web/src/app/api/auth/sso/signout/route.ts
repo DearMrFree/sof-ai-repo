@@ -42,6 +42,7 @@ const TRUSTED_NEXT_HOSTS = new Set([
   "iteachxr.thevrschool.org",
   // Temporary Railway production host until the LMS has a branded domain.
   "iteachxr-production.up.railway.app",
+  "iteachxr-production-d1b8.up.railway.app",
   "localhost:3000",
   "localhost:3001",
   "localhost:3002",

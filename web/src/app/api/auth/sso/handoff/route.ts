@@ -50,6 +50,7 @@ const TRUSTED_SISTER_HOSTS = new Set([
   "iteachxr.thevrschool.org",
   // Temporary Railway production host until the LMS has a branded domain.
   "iteachxr-production.up.railway.app",
+  "iteachxr-production-d1b8.up.railway.app",
   // Localhost for end-to-end testing of the sister site against this
   // canonical surface. Strict port-match keeps it safe; arbitrary
   // localhost ports won't resolve.
@@ -93,6 +94,24 @@ function buildSigninUrl(req: NextRequest, callbackUrl: URL, error?: string): URL
   signin.searchParams.set("callbackUrl", callbackUrl.toString());
   if (error) signin.searchParams.set("error", error);
   return signin;
+}
+
+function normalizeOrigin(raw: string): string {
+  const withScheme = raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`;
+  return withScheme.replace(/\/$/, "");
+}
+
+function finishOriginForDomain(domain: string): string {
+  if (domain === "iteachxr.com" || domain === "www.iteachxr.com") {
+    return normalizeOrigin(
+      process.env.ITEACHXR_URL ||
+        process.env.NEXT_PUBLIC_ITEACHXR_URL ||
+        "https://iteachxr-production-d1b8.up.railway.app",
+    );
+  }
+
+  const scheme = domain.startsWith("localhost") ? "http" : "https";
+  return `${scheme}://${domain}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -155,10 +174,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Localhost dev keeps http; everything else gets https. The trusted
-  // host set above is what stops ``http://evil.com`` ever reaching here.
-  const scheme = domain.startsWith("localhost") ? "http" : "https";
-  const finish = new URL(`${scheme}://${domain}/api/auth/sso/finish`);
+  // Localhost dev keeps http; everything else gets https. iTeachXR keeps
+  // aud=iteachxr.com for token validation, but can finish on its current
+  // Railway/custom deployment host while DNS is still moving.
+  const finish = new URL("/api/auth/sso/finish", finishOriginForDomain(domain));
   finish.searchParams.set("token", token);
   if (next !== "/") finish.searchParams.set("next", next);
 
