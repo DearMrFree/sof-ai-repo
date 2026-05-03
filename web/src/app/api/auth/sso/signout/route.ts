@@ -36,8 +36,16 @@ const TRUSTED_NEXT_HOSTS = new Set([
   "ai.thevrschool.org",
   "www.thevrschool.org",
   "thevrschool.org",
+  "iteachxr.com",
+  "www.iteachxr.com",
+  "lms.thevrschool.org",
+  "iteachxr.thevrschool.org",
+  // Temporary Railway production host until the LMS has a branded domain.
+  "iteachxr-production.up.railway.app",
   "localhost:3000",
   "localhost:3001",
+  "localhost:3002",
+  "localhost:5000",
 ]);
 
 function resolveNext(raw: string | null, requestUrl: string): string {

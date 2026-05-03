@@ -3,7 +3,7 @@
  *
  * Cross-TLD SSO handoff. ``ai.thevrschool.org`` is the canonical auth
  * surface for the School of Freedom ecosystem; sister sites on other
- * TLDs (today: ``sof.ai``) defer all sign-in to here, then receive a
+ * TLDs (today: ``sof.ai`` and iTeachXR) defer all sign-in to here, then receive a
  * short-lived signed bridge token that lets them mint their own local
  * NextAuth session cookie.
  *
@@ -42,13 +42,21 @@ const TRUSTED_SISTER_HOSTS = new Set([
   "sof.ai",
   "www.sof.ai",
   // iTeachXR — unified login gateway for the LMS platform.
+  "thevrschool.org",
+  "www.thevrschool.org",
   "iteachxr.com",
   "www.iteachxr.com",
+  "lms.thevrschool.org",
+  "iteachxr.thevrschool.org",
+  // Temporary Railway production host until the LMS has a branded domain.
+  "iteachxr-production.up.railway.app",
   // Localhost for end-to-end testing of the sister site against this
   // canonical surface. Strict port-match keeps it safe; arbitrary
   // localhost ports won't resolve.
   "localhost:3000",
   "localhost:3001",
+  "localhost:3002",
+  "localhost:5000",
 ]);
 
 function safeRelativeNext(raw: string | null): string {
