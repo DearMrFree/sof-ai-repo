@@ -104,28 +104,52 @@ export async function GET(req: NextRequest) {
   const cookieDomain = process.env.NEXTAUTH_COOKIE_DOMAIN || undefined;
 
   const res = NextResponse.redirect(next);
-  // Clearing means setting maxAge=0 with the SAME attributes the
-  // cookie was minted with — particularly the ``Domain``. Without
-  // a matching domain, the browser keeps the original cookie.
-  res.cookies.set(cookieName, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: useSecure,
-    maxAge: 0,
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
-  });
-  // Also clear the chunked variants NextAuth uses when the JWT grows
-  // beyond ~4KB (rare but real on rich profiles).
-  for (const suffix of [".0", ".1", ".2"]) {
-    res.cookies.set(cookieName + suffix, "", {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      secure: useSecure,
-      maxAge: 0,
-      ...(cookieDomain ? { domain: cookieDomain } : {}),
-    });
-  }
+  clearSessionCookies(res, cookieName, useSecure, cookieDomain);
   return res;
+}
+
+function clearSessionCookies(
+  res: NextResponse,
+  cookieName: string,
+  secure: boolean,
+  domain?: string,
+) {
+  const names = Array.from(new Set([
+    cookieName,
+    "__Secure-next-auth.session-token",
+    "next-auth.session-token",
+  ]));
+
+  for (const name of names) {
+    for (const suffix of ["", ".0", ".1", ".2"]) {
+      // Clear host-only cookies from older deployments. This matters
+      // when a browser still has an old ai.thevrschool.org guest cookie
+      // plus the newer Domain=.thevrschool.org cookie; either copy can
+      // otherwise shadow the fresh Google session during the SSO bridge.
+      appendExpiredCookie(res, name + suffix, secure);
+
+      if (domain) {
+        appendExpiredCookie(res, name + suffix, secure, domain);
+      }
+    }
+  }
+}
+
+function appendExpiredCookie(
+  res: NextResponse,
+  name: string,
+  secure: boolean,
+  domain?: string,
+) {
+  const parts = [
+    `${name}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+  ];
+  if (secure) parts.push("Secure");
+  if (domain) parts.push(`Domain=${domain}`);
+  res.headers.append("Set-Cookie", parts.join("; "));
 }

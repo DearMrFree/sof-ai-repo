@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2, School, Wallet as WalletIcon, BookOpen, UserPlus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { EducoinChip } from "@/components/EducoinChip";
@@ -93,7 +93,11 @@ export function Nav() {
                 {user.name ?? user.email}
               </div>
               <button
-                onClick={() => signOut({ callbackUrl: "/" })}
+                onClick={() => {
+                  const returnToAi = "https://ai.thevrschool.org/";
+                  const clearSofAi = `https://sof.ai/api/auth/sso/signout?next=${encodeURIComponent(returnToAi)}`;
+                  window.location.href = `/api/auth/sso/signout?next=${encodeURIComponent(clearSofAi)}`;
+                }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-800"
               >
                 <LogOut className="h-3.5 w-3.5" />
