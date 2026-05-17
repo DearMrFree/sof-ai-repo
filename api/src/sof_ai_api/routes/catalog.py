@@ -51,6 +51,7 @@ class CourseOut(BaseModel):
     year: Optional[int]
     has_video: bool
     has_assignments: bool
+    school_approved: bool
 
 
 class CourseListOut(BaseModel):
@@ -77,6 +78,7 @@ def _to_out(c: MitOcwCourse) -> CourseOut:
         year=c.year,
         has_video=c.has_video,
         has_assignments=c.has_assignments,
+        school_approved=bool(c.school_approved),
     )
 
 
@@ -202,6 +204,27 @@ def search_courses(
     deduped = sorted(seen.values(), key=lambda cs: cs[1], reverse=True)
     total = len(deduped)
     page = [c for c, _ in deduped[offset : offset + limit]]
+    return CourseListOut(total=total, offset=offset, limit=limit, results=[_to_out(c) for c in page])
+
+
+@router.get("/courses/approved", response_model=CourseListOut)
+def list_approved_courses(
+    department: Optional[str] = Query(default=None),
+    level: Optional[str] = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+    session: Session = Depends(get_session),
+) -> CourseListOut:
+    """Return VR School-endorsed MIT OCW courses, sorted by department + course number."""
+    stmt = select(MitOcwCourse).where(MitOcwCourse.school_approved == True)  # noqa: E712
+    if department:
+        stmt = stmt.where(col(MitOcwCourse.department).icontains(department))
+    if level:
+        stmt = stmt.where(MitOcwCourse.level == level)
+    rows = session.exec(stmt).all()
+    rows = sorted(rows, key=lambda c: (c.department.lower(), c.course_number.lower()))
+    total = len(rows)
+    page = rows[offset : offset + limit]
     return CourseListOut(total=total, offset=offset, limit=limit, results=[_to_out(c) for c in page])
 
 

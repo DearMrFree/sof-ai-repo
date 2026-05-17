@@ -996,6 +996,7 @@ class MitOcwCourse(SQLModel, table=True):
     has_video: bool = Field(default=False)
     has_assignments: bool = Field(default=False)
     last_synced: datetime = Field(default_factory=_utcnow)
+    school_approved: bool = Field(default=False)
 
 
 class AcademicPlanItem(SQLModel, table=True):

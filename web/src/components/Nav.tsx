@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2, School, Wallet as WalletIcon, BookOpen, UserPlus, LibraryBig, LayoutList } from "lucide-react";
+import { Sparkles, LogIn, LogOut, User, GraduationCap, Users, Newspaper, ClipboardList, UserCircle2, School, Wallet as WalletIcon, BookOpen, UserPlus, LibraryBig, LayoutList, ScrollText } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { EducoinChip } from "@/components/EducoinChip";
 
@@ -11,6 +11,7 @@ const navLinks = [
   { href: "/learn", label: "Learn", icon: GraduationCap },
   { href: "/catalog", label: "Catalog", icon: LibraryBig },
   { href: "/planner", label: "My Plan", icon: LayoutList },
+  { href: "/transcript", label: "Transcript", icon: ScrollText },
   { href: "/classroom", label: "Classroom", icon: Users },
   { href: "/classroom/feed", label: "Feed", icon: Newspaper },
   { href: "/classroom/assignments", label: "Assignments", icon: ClipboardList },

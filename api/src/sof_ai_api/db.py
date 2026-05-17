@@ -49,6 +49,9 @@ _ADDITIVE_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # exists on every deployed DB so create_all will not add this column;
     # default '' so existing rows render with the initials placeholder.
     ("userprofile", "photo_url", "VARCHAR DEFAULT ''"),
+    # vrmit — VR School course approval. Seeded curated courses start as 1;
+    # live-synced rows default to 0 until explicitly endorsed.
+    ("mitocwcourse", "school_approved", "INTEGER DEFAULT 0"),
 )
 
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Video, FileText, BookOpen, Plus, Check, ExternalLink } from "lucide-react";
+import { Video, FileText, BadgeCheck, Plus, Check, ExternalLink } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { cn } from "@/lib/cn";
 
@@ -21,6 +21,7 @@ export interface MitCourse {
   year: number | null;
   has_video: boolean;
   has_assignments: boolean;
+  school_approved: boolean;
 }
 
 interface Props {
@@ -73,6 +74,12 @@ export function MitCourseCard({ course, userId, onSaved, isSaved }: Props) {
             >
               {course.level}
             </span>
+            {course.school_approved && (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-900/40 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                <BadgeCheck className="h-2.5 w-2.5" />
+                VR School
+              </span>
+            )}
           </div>
           <h3 className="mt-1.5 text-sm font-semibold leading-snug text-white line-clamp-2">
             {course.title}

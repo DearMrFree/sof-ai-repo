@@ -35,6 +35,7 @@ _COURSES: list[dict] = [
         "year": 2020,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.004",
@@ -51,6 +52,7 @@ _COURSES: list[dict] = [
         "year": 2017,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.009",
@@ -67,6 +69,7 @@ _COURSES: list[dict] = [
         "year": 2020,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.042j",
@@ -83,6 +86,7 @@ _COURSES: list[dict] = [
         "year": 2015,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.034",
@@ -99,6 +103,7 @@ _COURSES: list[dict] = [
         "year": 2010,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.s191",
@@ -115,6 +120,7 @@ _COURSES: list[dict] = [
         "year": 2020,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.858",
@@ -131,6 +137,7 @@ _COURSES: list[dict] = [
         "year": 2014,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-6.033",
@@ -147,6 +154,7 @@ _COURSES: list[dict] = [
         "year": 2018,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Mathematics (18.xxx) ───────────────────────────────────────────────
     {
@@ -164,6 +172,7 @@ _COURSES: list[dict] = [
         "year": 2010,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-18.02sc",
@@ -180,6 +189,7 @@ _COURSES: list[dict] = [
         "year": 2010,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-18.03sc",
@@ -196,6 +206,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-18.06sc",
@@ -212,6 +223,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-18.650",
@@ -228,6 +240,7 @@ _COURSES: list[dict] = [
         "year": 2016,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-18.404j",
@@ -244,6 +257,7 @@ _COURSES: list[dict] = [
         "year": 2020,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Physics (8.xxx) ────────────────────────────────────────────────────
     {
@@ -261,6 +275,7 @@ _COURSES: list[dict] = [
         "year": 2016,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-8.02",
@@ -277,6 +292,7 @@ _COURSES: list[dict] = [
         "year": 2002,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-8.03sc",
@@ -293,6 +309,7 @@ _COURSES: list[dict] = [
         "year": 2016,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-8.04",
@@ -309,6 +326,7 @@ _COURSES: list[dict] = [
         "year": 2016,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Chemistry (5.xxx) ─────────────────────────────────────────────────
     {
@@ -326,6 +344,7 @@ _COURSES: list[dict] = [
         "year": 2014,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-5.60",
@@ -342,6 +361,7 @@ _COURSES: list[dict] = [
         "year": 2008,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Biology (7.xxx) ───────────────────────────────────────────────────
     {
@@ -359,6 +379,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-7.014",
@@ -375,6 +396,7 @@ _COURSES: list[dict] = [
         "year": 2005,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Mechanical Engineering (2.xxx) ────────────────────────────────────
     {
@@ -392,6 +414,7 @@ _COURSES: list[dict] = [
         "year": 2006,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-2.003j",
@@ -408,6 +431,7 @@ _COURSES: list[dict] = [
         "year": 2007,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-2.086",
@@ -424,6 +448,7 @@ _COURSES: list[dict] = [
         "year": 2014,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Economics (14.xxx) ────────────────────────────────────────────────
     {
@@ -441,6 +466,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-14.02",
@@ -457,6 +483,7 @@ _COURSES: list[dict] = [
         "year": 2009,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Political Science (17.xxx) ─────────────────────────────────────────
     {
@@ -474,6 +501,7 @@ _COURSES: list[dict] = [
         "year": 2004,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Architecture (4.xxx) ───────────────────────────────────────────────
     {
@@ -491,6 +519,7 @@ _COURSES: list[dict] = [
         "year": 2023,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-4.110",
@@ -507,6 +536,7 @@ _COURSES: list[dict] = [
         "year": 2020,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Philosophy (24.xxx) ───────────────────────────────────────────────
     {
@@ -524,6 +554,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Earth, Atmospheric, and Planetary Sciences (12.xxx) ───────────────
     {
@@ -541,6 +572,7 @@ _COURSES: list[dict] = [
         "year": 2012,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Writing (21W.xxx) ─────────────────────────────────────────────────
     {
@@ -558,6 +590,7 @@ _COURSES: list[dict] = [
         "year": 2016,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Linguistics (24.900) ──────────────────────────────────────────────
     {
@@ -575,6 +608,7 @@ _COURSES: list[dict] = [
         "year": 2012,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Management (15.xxx) ───────────────────────────────────────────────
     {
@@ -592,6 +626,7 @@ _COURSES: list[dict] = [
         "year": 2013,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     {
         "ocw_id": "ocw-15.501",
@@ -608,6 +643,7 @@ _COURSES: list[dict] = [
         "year": 2004,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Electrical Engineering (6.003) ────────────────────────────────────
     {
@@ -625,6 +661,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": True,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Health Sciences (HST.xxx) ─────────────────────────────────────────
     {
@@ -642,6 +679,7 @@ _COURSES: list[dict] = [
         "year": 2002,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Urban Studies (11.xxx) ────────────────────────────────────────────
     {
@@ -659,6 +697,7 @@ _COURSES: list[dict] = [
         "year": 2015,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Media Arts (CMS.xxx) ──────────────────────────────────────────────
     {
@@ -676,6 +715,7 @@ _COURSES: list[dict] = [
         "year": 2011,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Aeronautics and Astronautics (16.xxx) ────────────────────────────
     {
@@ -693,6 +733,7 @@ _COURSES: list[dict] = [
         "year": 2003,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
     # ── Civil Engineering (1.xxx) ─────────────────────────────────────────
     {
@@ -710,6 +751,7 @@ _COURSES: list[dict] = [
         "year": 2012,
         "has_video": False,
         "has_assignments": True,
+        "school_approved": True,
     },
 ]
 

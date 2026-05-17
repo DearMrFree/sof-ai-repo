@@ -1,11 +1,14 @@
 """Academic planner API — students save and track MIT OCW courses.
 
 A plan item moves through: interested → planned → in_progress → completed.
+The /transcript endpoint returns the student's aspirational academic transcript,
+formatted for ibuildme.cv or printing.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -156,3 +159,97 @@ def remove_item(
         raise HTTPException(status_code=404, detail="Plan item not found")
     session.delete(item)
     session.commit()
+
+
+# ── Aspirational Transcript ───────────────────────────────────────────────────
+
+_STATUS_ORDER = ["in_progress", "planned", "interested", "completed"]
+_STATUS_LABELS = {
+    "in_progress": "In Progress",
+    "planned": "Planned",
+    "interested": "Interested",
+    "completed": "Completed",
+}
+
+
+class TranscriptEntry(BaseModel):
+    plan_item_id: int
+    course_id: int
+    course_number: str
+    course_title: str
+    course_url: str
+    department: str
+    level: str
+    source: str  # "MIT OpenCourseWare"
+    school_approved: bool
+    status: str
+    notes: str
+    added_at: datetime
+
+
+class TranscriptSection(BaseModel):
+    status: str
+    label: str
+    courses: list[TranscriptEntry]
+
+
+class TranscriptOut(BaseModel):
+    user_id: str
+    generated_at: datetime
+    school_name: str
+    school_url: str
+    total_courses: int
+    approved_count: int
+    sections: list[TranscriptSection]
+
+
+@router.get("/transcript", response_model=TranscriptOut)
+def get_transcript(
+    user_id: str = Query(..., min_length=1),
+    session: Session = Depends(get_session),
+) -> TranscriptOut:
+    """Return the student's aspirational academic transcript for ibuildme.cv."""
+    items = session.exec(
+        select(AcademicPlanItem).where(AcademicPlanItem.user_id == user_id)
+    ).all()
+
+    by_status: dict[str, list[TranscriptEntry]] = {s: [] for s in _STATUS_ORDER}
+    approved_count = 0
+
+    for item in items:
+        course = session.get(MitOcwCourse, item.course_id)
+        approved = bool(course.school_approved) if course else False
+        if approved:
+            approved_count += 1
+        entry = TranscriptEntry(
+            plan_item_id=item.id,  # type: ignore[arg-type]
+            course_id=item.course_id,
+            course_number=course.course_number if course else "",
+            course_title=course.title if course else "",
+            course_url=course.url if course else "",
+            department=course.department if course else "",
+            level=course.level if course else "",
+            source="MIT OpenCourseWare",
+            school_approved=approved,
+            status=item.status,
+            notes=item.notes,
+            added_at=item.added_at,
+        )
+        bucket = item.status if item.status in by_status else "interested"
+        by_status[bucket].append(entry)
+
+    sections = [
+        TranscriptSection(status=s, label=_STATUS_LABELS[s], courses=by_status[s])
+        for s in _STATUS_ORDER
+        if by_status[s]
+    ]
+
+    return TranscriptOut(
+        user_id=user_id,
+        generated_at=datetime.now(UTC),
+        school_name="The VR School",
+        school_url="https://thevrschool.org",
+        total_courses=len(items),
+        approved_count=approved_count,
+        sections=sections,
+    )

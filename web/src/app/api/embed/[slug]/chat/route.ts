@@ -92,7 +92,9 @@ export function OPTIONS(): Response {
 
 const MAX_TURNS = 24; // hard ceiling to bound abuse of long sessions
 const MAX_CHARS_PER_MESSAGE = 4000;
-const MAX_TOOL_HOPS = 3; // submit_lead → result → final reply is 1 hop
+// luxai1: submit_lead → result → final reply is 1 hop
+// sofai-vr: search → add_to_plan → get_transcript is up to 3 hops
+const MAX_TOOL_HOPS = 5;
 
 function transcriptText(
   msgs: ChatBody["messages"],

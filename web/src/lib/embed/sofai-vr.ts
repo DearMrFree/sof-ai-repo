@@ -78,10 +78,25 @@ export const GET_ACADEMIC_PLAN_TOOL = {
   },
 } as const;
 
+export const GET_TRANSCRIPT_TOOL = {
+  name: "get_aspirational_transcript",
+  description:
+    "Retrieve the student's aspirational academic transcript — their full plan " +
+    "formatted for ibuildme.cv, showing VR School-approved courses and completion status. " +
+    "Call this when the student asks about their transcript, CV, academic record, or " +
+    "wants to see which of their courses are school-approved.",
+  input_schema: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+} as const;
+
 export const VR_TOOLS = [
   SEARCH_COURSES_TOOL,
   ADD_COURSE_TO_PLAN_TOOL,
   GET_ACADEMIC_PLAN_TOOL,
+  GET_TRANSCRIPT_TOOL,
 ] as const;
 
 // ── Tool input types ──────────────────────────────────────────────────────────
@@ -111,6 +126,27 @@ interface MitCourseResult {
   has_video: boolean;
   has_assignments: boolean;
   description: string;
+  school_approved: boolean;
+}
+
+interface TranscriptSection {
+  status: string;
+  label: string;
+  courses: {
+    course_number: string;
+    course_title: string;
+    course_url: string;
+    department: string;
+    level: string;
+    school_approved: boolean;
+    notes: string;
+  }[];
+}
+
+interface TranscriptResponse {
+  total_courses: number;
+  approved_count: number;
+  sections: TranscriptSection[];
 }
 
 interface PlanItem {
@@ -160,7 +196,11 @@ export async function executeVrTool(
       );
     }
     const lines = data.results.map((c) => {
-      const badges = [c.has_video ? "📹 Video" : "", c.has_assignments ? "📝 Assignments" : ""]
+      const badges = [
+        (c as MitCourseResult & { school_approved?: boolean }).school_approved ? "★ VR School Approved" : "",
+        c.has_video ? "📹 Video" : "",
+        c.has_assignments ? "📝 Assignments" : "",
+      ]
         .filter(Boolean)
         .join(" · ");
       return (
@@ -258,6 +298,53 @@ export async function executeVrTool(
     return `Your academic plan (${items.length} course${items.length === 1 ? "" : "s"}):\n\n${sections.join("\n\n")}`;
   }
 
+  if (toolName === "get_aspirational_transcript") {
+    if (!context.userId) {
+      return (
+        "The student needs to be signed in to view their transcript. " +
+        "Please sign in at thevrschool.org, then ask again."
+      );
+    }
+    let res: Response;
+    try {
+      res = await fetch(
+        `${base}/planner/transcript?user_id=${encodeURIComponent(context.userId)}`,
+        { cache: "no-store" },
+      );
+    } catch {
+      return "Error: could not reach the transcript service right now. Please visit thevrschool.org/transcript directly.";
+    }
+    if (!res.ok) {
+      return `Error retrieving transcript (status ${res.status}).`;
+    }
+    const data = (await res.json()) as TranscriptResponse;
+    if (data.total_courses === 0) {
+      return (
+        "Your aspirational transcript is empty — no courses saved yet. " +
+        "Search for a subject (like 'calculus' or 'algorithms') and I can help you add courses to your plan."
+      );
+    }
+    const sections = data.sections.map((s) => {
+      const approvedCourses = s.courses.filter((c) => c.school_approved);
+      const lines = s.courses.map(
+        (c) =>
+          `  • ${c.course_number} — ${c.course_title}` +
+          (c.school_approved ? " ★" : "") +
+          ` | ${c.department}`,
+      );
+      return (
+        `**${s.label}** (${s.courses.length}${approvedCourses.length ? `, ${approvedCourses.length} VR School approved` : ""}):\n` +
+        lines.join("\n")
+      );
+    });
+    return (
+      `Aspirational Transcript — ${data.total_courses} course${data.total_courses !== 1 ? "s" : ""}, ` +
+      `${data.approved_count} VR School approved (★):\n\n` +
+      sections.join("\n\n") +
+      "\n\nView the full printable version at thevrschool.org/transcript"
+    );
+  }
+
   return `Unknown tool: ${toolName}`;
 }
 
@@ -283,18 +370,33 @@ discipline, and build a meaningful learning plan — all for free.
 - Each course includes lecture notes; many include videos, problem sets, and exams.
 - Students browse and search at thevrschool.org/catalog and track courses in their
   Academic Plan at thevrschool.org/planner.
+- **VR School Approved (★)**: The VR School has curated and endorsed a set of MIT OCW
+  courses that align with its K–12 curriculum. These appear with a "VR School" badge in
+  the catalog and a ★ in the transcript. Students are encouraged to prioritize these.
+
+# Aspirational Transcript (ibuildme.cv)
+- Students can view their academic plan as a printable Aspirational Transcript at
+  thevrschool.org/transcript.
+- The transcript shows all saved courses organized by status, highlights VR School-approved
+  courses, and is formatted for ibuildme.cv — a student CV builder.
+- This is NOT an official academic credential; it documents independent study goals and
+  enrichment coursework alongside formal schooling.
 
 # Your Capabilities
 1. **Search courses** — call \`search_mit_courses\` whenever the student mentions a
    subject, topic, instructor, or course number. Always show the course URL.
+   VR School-approved courses are marked ★.
 2. **Save courses** — call \`add_course_to_plan\` only when the student explicitly asks
    to save/add a specific course. Confirm: "I've added [title] to your plan."
 3. **View plan** — call \`get_academic_plan\` when the student asks to see their
    saved courses or academic progress.
-4. **Recommend paths** — suggest logical academic sequences based on your knowledge:
+4. **View transcript** — call \`get_aspirational_transcript\` when the student asks about
+   their transcript, CV, academic record, or which courses are school-approved.
+5. **Recommend paths** — suggest logical academic sequences based on your knowledge:
    e.g. "Single Variable Calculus → Multivariable → Differential Equations" for math,
-   or "Introduction to CS → Algorithms → Systems" for CS.
-5. **Explain content** — describe what a course covers and whether it suits the student's
+   or "Introduction to CS → Algorithms → Systems" for CS. Always prioritize VR School
+   approved courses when recommending.
+6. **Explain content** — describe what a course covers and whether it suits the student's
    goals, grade level, or interests.
 
 # Showing Search Results
