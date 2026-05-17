@@ -15,10 +15,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest } from "next/server";
 import {
-  buildSystemPrompt,
+  buildSystemPrompt as buildLuxSystemPrompt,
   SUBMIT_LEAD_TOOL,
   type SubmitLeadInput,
 } from "@/lib/embed/luxai1";
+import {
+  buildSystemPrompt as buildVrSystemPrompt,
+  VR_TOOLS,
+  executeVrTool,
+} from "@/lib/embed/sofai-vr";
 import { notifyBlajon } from "@/lib/embed/lead-email";
 import {
   ownerEmailFor,
@@ -34,7 +39,11 @@ export const dynamic = "force-dynamic";
 interface ChatBody {
   messages: { role: "user" | "assistant"; content: string }[];
   client_thread_id?: string;
+  /** Optional: signed-in student's user ID (used by sofai-vr planner tools). */
+  user_id?: string;
 }
+
+const VALID_SLUGS = new Set(["luxai1", "sofai-vr"]);
 
 /**
  * Lightweight UUID v4 fallback when a client doesn't send a thread id
@@ -101,18 +110,19 @@ export async function POST(
   { params }: { params: Promise<{ slug: string }> },
 ): Promise<Response> {
   const { slug } = await params;
-  if (slug !== "luxai1") {
+  if (!VALID_SLUGS.has(slug)) {
     return jsonResponse({ error: "unknown_agent" }, { status: 404 });
   }
 
+  const isVrSchool = slug === "sofai-vr";
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
+    const offlineReply = isVrSchool
+      ? "Sorry — SofAI is offline for a moment. Please visit thevrschool.org/catalog to browse courses directly."
+      : "Sorry — LuxAI1 is offline for a moment. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will get back to you shortly.";
     return jsonResponse(
-      {
-        error: "not_configured",
-        reply:
-          "Sorry — LuxAI1 is offline for a moment. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will get back to you shortly.",
-      },
+      { error: "not_configured", reply: offlineReply },
       { status: 503 },
     );
   }
@@ -127,12 +137,11 @@ export async function POST(
     return jsonResponse({ error: "no_messages" }, { status: 400 });
   }
   if (body.messages.length > MAX_TURNS) {
+    const tooLongReply = isVrSchool
+      ? "This conversation is getting long — visit thevrschool.org/catalog to continue exploring courses."
+      : "This conversation is getting long — please call (408) 872-8340 to continue with a human.";
     return jsonResponse(
-      {
-        error: "too_long",
-        reply:
-          "This conversation is getting long — please call (408) 872-8340 to continue with a human.",
-      },
+      { error: "too_long", reply: tooLongReply },
       { status: 413 },
     );
   }
@@ -146,7 +155,9 @@ export async function POST(
     }
   }
 
-  const system = await buildSystemPrompt(slug);
+  const system = isVrSchool
+    ? await buildVrSystemPrompt(slug)
+    : await buildLuxSystemPrompt(slug);
   const client = new Anthropic({ apiKey });
   const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
   const userAgent = req.headers.get("user-agent") ?? undefined;
@@ -192,6 +203,10 @@ export async function POST(
   let leadError: string | undefined;
   let finalText = "";
 
+  const agentTools = isVrSchool
+    ? (VR_TOOLS as unknown as Parameters<typeof client.messages.create>[0]["tools"])
+    : ([SUBMIT_LEAD_TOOL] as unknown as Parameters<typeof client.messages.create>[0]["tools"]);
+
   // The whole tool-use loop runs inside a try/catch so an Anthropic
   // outage (rate limit, overload, transient 5xx, network blip) returns
   // a structured 502 with the same `Access-Control-Allow-Origin: *`
@@ -206,9 +221,7 @@ export async function POST(
       model,
       max_tokens: 1024,
       system,
-      tools: [SUBMIT_LEAD_TOOL] as unknown as Parameters<
-        typeof client.messages.create
-      >[0]["tools"],
+      tools: agentTools,
       messages: sdkMessages,
     });
 
@@ -231,70 +244,84 @@ export async function POST(
 
     // Execute each tool_use and accumulate tool_result blocks.
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const tu of toolUses) {
-      if (tu.name === SUBMIT_LEAD_TOOL.name) {
-        const input = tu.input as SubmitLeadInput;
-        if (!input?.name || !input?.service) {
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: tu.id,
-            content:
-              "Error: missing required fields. Need at least name and service.",
-            is_error: true,
-          });
-          continue;
-        }
-        const result = await notifyBlajon(input, {
-          transcript: transcriptText(body.messages, texts),
-          userAgent,
+
+    if (isVrSchool) {
+      // VR School: catalog search, plan management
+      for (const tu of toolUses) {
+        const result = await executeVrTool(tu.name, tu.input, {
+          userId: body.user_id,
         });
-        if (result.delivered) {
-          leadSubmitted = true;
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: tu.id,
-            content: `Lead delivered to Blajon. Confirm to the customer that AI1's team will follow up within a few hours. ticket=${result.messageId ?? "logged"}`,
-          });
-        } else {
-          // Logged-only (no API key) is still a "soft success" — the
-          // request reached the system; surface that, but don't lie.
-          if (result.provider === "logged") {
-            leadSubmitted = true;
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: result,
+        });
+      }
+    } else {
+      // LuxAI1: lead capture
+      for (const tu of toolUses) {
+        if (tu.name === SUBMIT_LEAD_TOOL.name) {
+          const input = tu.input as SubmitLeadInput;
+          if (!input?.name || !input?.service) {
             toolResults.push({
               type: "tool_result",
               tool_use_id: tu.id,
               content:
-                "Lead recorded (preview environment, not yet emailed). Confirm to the customer that AI1's team will follow up.",
+                "Error: missing required fields. Need at least name and service.",
+              is_error: true,
             });
-          } else {
-            leadError = result.error;
+            continue;
+          }
+          const result = await notifyBlajon(input, {
+            transcript: transcriptText(body.messages, texts),
+            userAgent,
+          });
+          if (result.delivered) {
+            leadSubmitted = true;
             toolResults.push({
               type: "tool_result",
               tool_use_id: tu.id,
-              content: `Error sending lead: ${result.error ?? "unknown"}. Apologize and offer to take their info another way (call 408-872-8340 or email luxservicesbayarea@gmail.com).`,
-              is_error: true,
+              content: `Lead delivered to Blajon. Confirm to the customer that AI1's team will follow up within a few hours. ticket=${result.messageId ?? "logged"}`,
             });
+          } else {
+            if (result.provider === "logged") {
+              leadSubmitted = true;
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: tu.id,
+                content:
+                  "Lead recorded (preview environment, not yet emailed). Confirm to the customer that AI1's team will follow up.",
+              });
+            } else {
+              leadError = result.error;
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: tu.id,
+                content: `Error sending lead: ${result.error ?? "unknown"}. Apologize and offer to take their info another way (call 408-872-8340 or email luxservicesbayarea@gmail.com).`,
+                is_error: true,
+              });
+            }
           }
+        } else {
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: `Unknown tool: ${tu.name}`,
+            is_error: true,
+          });
         }
-      } else {
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: `Unknown tool: ${tu.name}`,
-          is_error: true,
-        });
       }
     }
+
     sdkMessages.push({ role: "user", content: toolResults });
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console
-    console.error("[embed/luxai1/chat] anthropic_error", { detail });
-    // Persist the conversation even on model error — the visitor's
-    // turn(s) and any lead that already fired are real signal that
-    // Blajon and the insights pipeline want to see.
-    const errorReply = leadSubmitted
+    console.error(`[embed/${slug}/chat] anthropic_error`, { detail });
+    const errorReply = isVrSchool
+      ? "Sorry — I'm having trouble right now. Please visit thevrschool.org/catalog to continue exploring courses."
+      : leadSubmitted
       ? "Got your details — Blajon's team will be in touch soon. (My follow-up reply hit a snag, but your request is in.)"
       : "Sorry — I'm having trouble thinking right now. Please call (408) 872-8340 or email luxservicesbayarea@gmail.com and Blajon will help directly.";
     const errorTranscript: EmbedTranscriptMessage[] = [
@@ -328,8 +355,9 @@ export async function POST(
   }
 
   if (!finalText) {
-    finalText =
-      "Sorry — I had trouble responding. Please call (408) 872-8340 and Blajon's team will help directly.";
+    finalText = isVrSchool
+      ? "Sorry — I had trouble responding. Please visit thevrschool.org/catalog to browse courses directly."
+      : "Sorry — I had trouble responding. Please call (408) 872-8340 and Blajon's team will help directly.";
   }
 
   // Persist the conversation as training data. Done after we've already

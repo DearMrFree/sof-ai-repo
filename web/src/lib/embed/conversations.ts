@@ -104,6 +104,7 @@ export async function shortHash(input: string): Promise<string> {
 /** Owner registry: which email owns each agent slug. */
 const AGENT_OWNERS: Record<string, string> = {
   luxai1: "luxservicesbayarea@gmail.com",
+  "sofai-vr": "freedom@thevrschool.org",
 };
 
 export function ownerEmailFor(slug: string): string {
@@ -119,6 +120,10 @@ export function ownerEmailFor(slug: string): string {
 const AGENT_VIEWERS: Record<string, string[]> = {
   luxai1: [
     "luxservicesbayarea@gmail.com",
+    "freedom@thevrschool.org",
+    "devin@sof.ai",
+  ],
+  "sofai-vr": [
     "freedom@thevrschool.org",
     "devin@sof.ai",
   ],
