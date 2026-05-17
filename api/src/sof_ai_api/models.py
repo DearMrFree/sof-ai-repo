@@ -963,6 +963,63 @@ class MagicLinkToken(SQLModel, table=True):
     ip_hash: str = Field(default="", max_length=128)
     user_agent: str = Field(default="", max_length=300)
 
+class MitOcwCourse(SQLModel, table=True):
+    """A course record synced from MIT OpenCourseWare / MIT Learn.
+
+    OCW content is licensed CC BY-NC-SA 4.0. Every artifact derived from this
+    data must preserve attribution: "© MIT OpenCourseWare, CC BY-NC-SA 4.0."
+    The ``url`` field always points to the canonical OCW page which carries the
+    license notice.
+
+    ``ocw_id`` is the stable identifier from the upstream source (e.g.
+    "ocw-6.006" or the MIT Learn UUID). ``last_synced`` records when we last
+    pulled from the upstream API so a cron job can refresh stale rows.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("ocw_id", name="uq_mitocw_course_ocw_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ocw_id: str = Field(index=True, max_length=128)
+    course_number: str = Field(default="", max_length=32, index=True)
+    title: str = Field(max_length=300)
+    description: str = Field(default="")
+    url: str = Field(default="", max_length=500)
+    thumbnail_url: str = Field(default="", max_length=500)
+    department: str = Field(default="", max_length=200, index=True)
+    level: str = Field(default="", max_length=64, index=True)
+    subjects_json: str = Field(default="[]")
+    instructors_json: str = Field(default="[]")
+    semester: str = Field(default="", max_length=32)
+    year: Optional[int] = Field(default=None)
+    has_video: bool = Field(default=False)
+    has_assignments: bool = Field(default=False)
+    last_synced: datetime = Field(default_factory=_utcnow)
+
+
+class AcademicPlanItem(SQLModel, table=True):
+    """One course in a student's academic plan.
+
+    A student may save any MitOcwCourse to their plan and track its status
+    through interested → planned → in_progress → completed. Multiple items
+    for the same (user_id, course_id) are prevented by the unique index so a
+    double-click on "Save" doesn't create duplicates.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "course_id", name="uq_plan_item_user_course"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
+    course_id: int = Field(index=True)
+    status: str = Field(default="interested", index=True, max_length=20)
+    notes: str = Field(default="", max_length=1000)
+    added_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class PioneerApplication(SQLModel, table=True):
     """A Pioneer's application to enter the School of Freedom.
 

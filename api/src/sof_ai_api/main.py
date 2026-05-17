@@ -8,6 +8,7 @@ from .routes import (
     applications,
     articles,
     auth,
+    catalog,
     challenges,
     devin,
     embed,
@@ -15,6 +16,7 @@ from .routes import (
     health,
     journals,
     pioneer_applications,
+    planner,
     progress,
     twins,
     users,
@@ -22,6 +24,7 @@ from .routes import (
 )
 from .seed_journal_agentic_teaching import seed as seed_journal_agentic_teaching
 from .seed_journal_ai import seed as seed_journal_ai
+from .seed_mit_ocw import seed as seed_mit_ocw
 from .settings import settings
 
 
@@ -37,6 +40,7 @@ async def lifespan(_: FastAPI):
     for _seed_fn, _label in (
         (seed_journal_ai, "journal-ai"),
         (seed_journal_agentic_teaching, "agentic-teaching"),
+        (seed_mit_ocw, "mit-ocw"),
     ):
         try:
             with next(get_session()) as session:
@@ -64,6 +68,8 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(catalog.router)
+app.include_router(planner.router)
 app.include_router(progress.router)
 app.include_router(devin.router)
 app.include_router(challenges.router)
