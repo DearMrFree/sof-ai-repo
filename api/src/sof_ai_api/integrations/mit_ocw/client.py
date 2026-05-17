@@ -69,12 +69,20 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
                 seen.add(name)
                 instructors.append(name)
 
-    # Topics — top-level only (parent is None), then children for depth.
-    subjects: list[str] = []
-    for t in raw.get("topics") or []:
-        name = str(t.get("name") or "").strip()
-        if name:
-            subjects.append(name)
+    # Subjects — ocw_topics is a flat list of specific OCW subject labels
+    # (e.g. ["Algorithms and Data Structures", "Computer Science"]).
+    # Prefer it over the broad "topics" parent-category tree, which produces
+    # too many false positives in search (e.g. every EECS course would match
+    # "Data Science, Analytics & Computer Technology").
+    raw_ocw_topics: list[str] = raw.get("ocw_topics") or []
+    subjects: list[str] = [s.strip() for s in raw_ocw_topics if s and s.strip()]
+    # Fall back to topics names only when ocw_topics is empty.
+    if not subjects:
+        subjects = [
+            str(t.get("name") or "").strip()
+            for t in (raw.get("topics") or [])
+            if t.get("name")
+        ]
 
     # Level — take name from first entry in best_run's level list.
     level_list = best_run.get("level") or []

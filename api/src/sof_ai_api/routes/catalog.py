@@ -15,16 +15,22 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from pydantic import BaseModel
 from sqlmodel import Session, col, func, select
 
-from ..db import get_session, engine
+from ..db import engine, get_session
 from ..integrations.mit_ocw.client import count_in_db, fetch_and_upsert
+from ..models import MitOcwCourse
 from ..settings import settings
 
 logger = logging.getLogger(__name__)
 
 # In-process sync state — good enough for a single-worker deployment.
 _sync_lock = threading.Lock()
-_sync_state: dict = {"running": False, "last_started": None, "last_finished": None, "last_count": 0, "last_error": None}
-from ..models import MitOcwCourse
+_sync_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "last_count": 0,
+    "last_error": None,
+}
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -74,6 +80,55 @@ def _to_out(c: MitOcwCourse) -> CourseOut:
     )
 
 
+def _score_course(course: MitOcwCourse, words: list[str]) -> int:
+    """Relevance score for a course against a list of query words.
+
+    Scoring weights (per word, additive):
+      500  — full phrase match in title (exact phrase, multi-word only)
+      200  — course-number contains the word (e.g. "6.006" → top result)
+      100  — title contains the word
+       60  — subjects/ocw_topics contains the word
+       50  — instructor name contains the word
+       30  — department name contains the word
+       10  — description contains the word
+
+    For multi-word queries ALL words must appear somewhere — a course that
+    only matches half the words gets score 0 so it won't appear in results.
+    """
+    title_l = course.title.lower()
+    desc_l = (course.description or "").lower()
+    num_l = course.course_number.lower()
+    dept_l = (course.department or "").lower()
+    subj_l = (course.subjects_json or "").lower()
+    instr_l = (course.instructors_json or "").lower()
+
+    score = 0
+    # Bonus for the entire phrase appearing verbatim in the title.
+    if len(words) > 1 and " ".join(words) in title_l:
+        score += 500
+
+    for word in words:
+        word_score = 0
+        if word in num_l:
+            word_score += 200
+        if word in title_l:
+            word_score += 100
+        if word in subj_l:
+            word_score += 60
+        if word in instr_l:
+            word_score += 50
+        if word in dept_l:
+            word_score += 30
+        if word in desc_l:
+            word_score += 10
+        if word_score == 0:
+            # This word matched nowhere → discard the whole course.
+            return 0
+        score += word_score
+
+    return score
+
+
 @router.get("/courses", response_model=CourseListOut)
 def list_courses(
     department: Optional[str] = Query(default=None),
@@ -83,7 +138,7 @@ def list_courses(
     limit: int = Query(default=24, ge=1, le=100),
     session: Session = Depends(get_session),
 ) -> CourseListOut:
-    """Paginated course list with optional filters."""
+    """Paginated course list with optional filters, sorted by department + course number."""
     stmt = select(MitOcwCourse)
     if department:
         stmt = stmt.where(col(MitOcwCourse.department).icontains(department))
@@ -93,6 +148,7 @@ def list_courses(
         stmt = stmt.where(MitOcwCourse.has_video == has_video)
 
     all_rows = session.exec(stmt).all()
+    all_rows = sorted(all_rows, key=lambda c: (c.department.lower(), c.course_number.lower()))
     total = len(all_rows)
     page = all_rows[offset : offset + limit]
     return CourseListOut(total=total, offset=offset, limit=limit, results=[_to_out(c) for c in page])
@@ -107,8 +163,16 @@ def search_courses(
     limit: int = Query(default=24, ge=1, le=100),
     session: Session = Depends(get_session),
 ) -> CourseListOut:
-    """Full-text search across title, description, subjects, course_number, and department."""
-    term = q.lower().strip()
+    """Relevance-ranked full-text search.
+
+    Tokenises the query into words; every word must appear somewhere in the
+    course record.  Results are sorted by score (highest first):
+    course-number > title > subjects/topics > instructor > department > description.
+    """
+    words = [w for w in q.lower().strip().split() if w]
+    if not words:
+        return CourseListOut(total=0, offset=offset, limit=limit, results=[])
+
     stmt = select(MitOcwCourse)
     if department:
         stmt = stmt.where(col(MitOcwCourse.department).icontains(department))
@@ -116,17 +180,28 @@ def search_courses(
         stmt = stmt.where(MitOcwCourse.level == level)
 
     all_rows = session.exec(stmt).all()
-    matched = [
-        c for c in all_rows
-        if term in c.title.lower()
-        or term in c.description.lower()
-        or term in c.course_number.lower()
-        or term in c.department.lower()
-        or term in (c.subjects_json or "").lower()
-        or term in (c.instructors_json or "").lower()
+    scored = [
+        (c, _score_course(c, words))
+        for c in all_rows
     ]
-    total = len(matched)
-    page = matched[offset : offset + limit]
+    matched = [(c, s) for c, s in scored if s > 0]
+    matched.sort(key=lambda cs: cs[1], reverse=True)
+
+    # Deduplicate: multiple OCW editions of the same course (e.g. 6.006+fall_2020
+    # and 6.006+spring_2020) appear as separate DB rows.  Keep the highest-scoring
+    # edition per (course_number, normalised title); ties go to the more recent year.
+    seen: dict[str, tuple[MitOcwCourse, int]] = {}
+    for c, s in matched:
+        key = f"{c.course_number}:{c.title.lower()}"
+        existing_c, existing_s = seen.get(key, (None, -1))
+        if s > existing_s or (
+            s == existing_s and (c.year or 0) > (existing_c.year if existing_c else 0)
+        ):
+            seen[key] = (c, s)
+
+    deduped = sorted(seen.values(), key=lambda cs: cs[1], reverse=True)
+    total = len(deduped)
+    page = [c for c, _ in deduped[offset : offset + limit]]
     return CourseListOut(total=total, offset=offset, limit=limit, results=[_to_out(c) for c in page])
 
 

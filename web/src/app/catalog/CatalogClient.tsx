@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, SlidersHorizontal, X, Loader2 } from "lucide-react";
+import { Search, SlidersHorizontal, X, Loader2, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { MitCourseCard, type MitCourse } from "@/components/MitCourseCard";
 import { cn } from "@/lib/cn";
@@ -14,6 +14,19 @@ interface CourseListResponse {
 }
 
 const PAGE_SIZE = 24;
+
+const QUICK_SEARCHES = [
+  "machine learning",
+  "calculus",
+  "linear algebra",
+  "algorithms",
+  "quantum mechanics",
+  "python",
+  "economics",
+  "climate change",
+  "entrepreneurship",
+  "differential equations",
+];
 
 interface Props {
   departments: string[];
@@ -86,74 +99,99 @@ export function CatalogClient({ departments, levels }: Props) {
   }
 
   const hasFilters = query || department || level;
+  const showTips = !hasFilters && courses.length > 0;
 
   return (
     <div>
-      {/* Search + Filters */}
-      <div className="mb-6 flex flex-wrap gap-3">
+      {/* Search bar */}
+      <div className="mb-4 flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-48">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
           <input
             type="text"
-            placeholder="Search courses, topics, instructors…"
+            placeholder='Search by topic, course code, or instructor — e.g. "6.006" or "machine learning"'
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 py-2 pl-9 pr-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 py-2.5 pl-9 pr-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
           />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <SlidersHorizontal className="h-4 w-4 text-zinc-500" />
-          <select
-            value={department}
-            onChange={(e) => setDepartment(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 py-2 pl-3 pr-8 text-sm text-white outline-none focus:border-indigo-500"
-          >
-            <option value="">All departments</option>
-            {departments.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={level}
-            onChange={(e) => setLevel(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 py-2 pl-3 pr-8 text-sm text-white outline-none focus:border-indigo-500"
-          >
-            <option value="">All levels</option>
-            {levels.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-400 transition hover:text-white"
-            >
-              <X className="h-3.5 w-3.5" />
-              Clear
-            </button>
-          )}
         </div>
       </div>
 
+      {/* Filters row */}
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <SlidersHorizontal className="h-3.5 w-3.5 text-zinc-500" />
+        <select
+          value={department}
+          onChange={(e) => setDepartment(e.target.value)}
+          className="rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 pl-3 pr-7 text-xs text-white outline-none focus:border-indigo-500"
+        >
+          <option value="">All departments</option>
+          {departments.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={level}
+          onChange={(e) => setLevel(e.target.value)}
+          className="rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 pl-3 pr-7 text-xs text-white outline-none focus:border-indigo-500"
+        >
+          <option value="">All levels</option>
+          {levels.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+
+        {hasFilters && (
+          <button
+            onClick={clearFilters}
+            className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-400 transition hover:text-white"
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Quick-search chips (shown when no active filters) */}
+      {showTips && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-xs text-zinc-500">
+            <Sparkles className="h-3 w-3" />
+            Try:
+          </span>
+          {QUICK_SEARCHES.map((s) => (
+            <button
+              key={s}
+              onClick={() => setQuery(s)}
+              className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-400 transition hover:border-indigo-500/60 hover:text-indigo-300"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Results count */}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <p className="text-xs text-zinc-500">
-          {loading ? "Searching…" : `${total.toLocaleString()} course${total === 1 ? "" : "s"}`}
-          {hasFilters && !loading && " matching your filters"}
+          {loading
+            ? "Searching…"
+            : query.trim()
+            ? `${total.toLocaleString()} result${total === 1 ? "" : "s"} for "${query}"`
+            : `${total.toLocaleString()} course${total === 1 ? "" : "s"}`}
+          {(department || level) && !loading && " · filtered"}
         </p>
         {!session?.user && (
-          <p className="text-xs text-zinc-500">
+          <p className="shrink-0 text-xs text-zinc-500">
             <a href="/signin" className="text-indigo-400 underline">
               Sign in
             </a>{" "}
-            to save courses to your academic plan.
+            to save to your plan.
           </p>
         )}
       </div>
@@ -164,13 +202,22 @@ export function CatalogClient({ departments, levels }: Props) {
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
       ) : courses.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-500">
-          No courses found.{" "}
-          {hasFilters && (
-            <button onClick={clearFilters} className="text-indigo-400 underline">
-              Clear filters
+        <div className="rounded-xl border border-dashed border-zinc-800 p-10 text-center">
+          <p className="text-sm text-zinc-400">No courses found for &ldquo;{query}&rdquo;.</p>
+          <p className="mt-2 text-xs text-zinc-500">
+            Try a shorter query, a course number (e.g.{" "}
+            <button
+              onClick={() => setQuery("6.006")}
+              className="text-indigo-400 underline"
+            >
+              6.006
             </button>
-          )}
+            ), or{" "}
+            <button onClick={clearFilters} className="text-indigo-400 underline">
+              clear all filters
+            </button>
+            .
+          </p>
         </div>
       ) : (
         <>

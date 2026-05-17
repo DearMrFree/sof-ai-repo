@@ -28,6 +28,9 @@ _SAMPLE_RAW = {
         "id": 2012,
         "url": "https://ocw.mit.edu/courses/11-165-infrastructure-and-energy-technology-challenges-fall-2011/thumb.jpg",
     },
+    # ocw_topics is the fine-grained tag list we actually store (preferred).
+    # topics is the broad parent-category tree (fallback only).
+    "ocw_topics": ["Developmental Economics", "Economics", "Energy", "International Development", "Public Policy"],
     "topics": [
         {"id": 698, "name": "Data Science, Analytics & Computer Technology", "parent": None},
         {"id": 712, "name": "Social Sciences", "parent": None},
@@ -58,6 +61,7 @@ _SAMPLE_VIDEO = {
     **_SAMPLE_RAW,
     "readable_id": "6.006+fall_2020",
     "title": "Introduction to Algorithms",
+    "ocw_topics": ["Algorithms and Data Structures", "Computer Science", "Theory of Computation"],
     "course_feature": ["Lecture Videos", "Problem Sets"],
     "departments": [{"department_id": "6", "name": "Electrical Engineering and Computer Science"}],
     "runs": [
@@ -75,6 +79,7 @@ _SAMPLE_GRAD = {
     **_SAMPLE_RAW,
     "readable_id": "6.858+fall_2014",
     "title": "Computer Systems Security",
+    "ocw_topics": ["Computer Science", "Security Studies", "Theory of Computation"],
     "course_feature": ["Lecture Videos"],
     "departments": [{"department_id": "6", "name": "Electrical Engineering and Computer Science"}],
     "runs": [
@@ -114,11 +119,24 @@ def test_normalize_instructors():
     assert "Prof. Apiwat Ratanawaraha" in instructors
 
 
-def test_normalize_subjects():
+def test_normalize_subjects_uses_ocw_topics():
     import json
     out = _normalize(_SAMPLE_RAW)
     subjects = json.loads(out["subjects_json"])
-    assert "Social Sciences" in subjects
+    # Must use fine-grained ocw_topics, not broad parent topics.
+    assert "Economics" in subjects
+    assert "Public Policy" in subjects
+    # The broad parent label should NOT appear — it pollutes search relevance.
+    assert "Social Sciences" not in subjects
+    assert "Data Science, Analytics & Computer Technology" not in subjects
+
+
+def test_normalize_subjects_fallback_to_topics_when_ocw_topics_missing():
+    import json
+    raw = {**_SAMPLE_RAW, "ocw_topics": None}
+    out = _normalize(raw)
+    subjects = json.loads(out["subjects_json"])
+    # Falls back to the topics tree names.
     assert "Economics" in subjects
 
 
