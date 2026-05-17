@@ -6,13 +6,24 @@ All course data is © MIT OpenCourseWare, CC BY-NC-SA 4.0.
 from __future__ import annotations
 
 import json
+import logging
+import threading
+from datetime import UTC, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, func, select
 
-from ..db import get_session
+from ..db import get_session, engine
+from ..integrations.mit_ocw.client import count_in_db, fetch_and_upsert
+from ..settings import settings
+
+logger = logging.getLogger(__name__)
+
+# In-process sync state — good enough for a single-worker deployment.
+_sync_lock = threading.Lock()
+_sync_state: dict = {"running": False, "last_started": None, "last_finished": None, "last_count": 0, "last_error": None}
 from ..models import MitOcwCourse
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -142,3 +153,75 @@ def list_levels(session: Session = Depends(get_session)) -> list[str]:
     """Return sorted list of all distinct levels in the catalog."""
     rows = session.exec(select(MitOcwCourse.level)).all()
     return sorted({r for r in rows if r})
+
+
+# ── Sync endpoints ────────────────────────────────────────────────────────────
+
+class SyncStatusOut(BaseModel):
+    running: bool
+    total_courses_in_db: int
+    last_started: Optional[datetime]
+    last_finished: Optional[datetime]
+    last_synced_count: int
+    last_error: Optional[str]
+
+
+class SyncStartOut(BaseModel):
+    started: bool
+    message: str
+
+
+def _run_sync(limit: int) -> None:
+    global _sync_state
+    _sync_state["running"] = True
+    _sync_state["last_error"] = None
+    try:
+        from sqlmodel import Session as _Session
+        with _Session(engine) as session:
+            n = fetch_and_upsert(session, limit=limit)
+        _sync_state["last_count"] = n
+        _sync_state["last_finished"] = datetime.now(UTC)
+        logger.info("catalog sync finished rows=%d", n)
+    except Exception as exc:
+        _sync_state["last_error"] = str(exc)
+        logger.exception("catalog sync failed: %s", exc)
+    finally:
+        _sync_state["running"] = False
+
+
+@router.get("/sync/status", response_model=SyncStatusOut)
+def sync_status(session: Session = Depends(get_session)) -> SyncStatusOut:
+    """Return the current sync status and total course count in the DB."""
+    total = count_in_db(session)
+    return SyncStatusOut(
+        running=_sync_state["running"],
+        total_courses_in_db=total,
+        last_started=_sync_state["last_started"],
+        last_finished=_sync_state["last_finished"],
+        last_synced_count=_sync_state["last_count"],
+        last_error=_sync_state["last_error"],
+    )
+
+
+@router.post("/sync", response_model=SyncStartOut)
+def start_sync(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(default=2600, ge=1, le=3000),
+    x_internal_auth: str = Header(default=""),
+) -> SyncStartOut:
+    """Trigger a background sync from the MIT Learn API.
+
+    Requires the ``X-Internal-Auth`` header (same secret used by wallet routes).
+    With ``limit`` you can do a partial sync for testing (e.g. ``limit=100``).
+    """
+    if settings.internal_api_key and x_internal_auth != settings.internal_api_key:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Internal-Auth")
+
+    with _sync_lock:
+        if _sync_state["running"]:
+            return SyncStartOut(started=False, message="Sync already in progress")
+        _sync_state["running"] = True
+        _sync_state["last_started"] = datetime.now(UTC)
+
+    background_tasks.add_task(_run_sync, limit)
+    return SyncStartOut(started=True, message=f"Sync started (limit={limit})")

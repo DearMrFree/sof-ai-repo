@@ -1,5 +1,6 @@
 import { Nav } from "@/components/Nav";
 import { getApiBaseUrl } from "@/lib/apiBase";
+import { CatalogSyncStatus } from "@/components/CatalogSyncStatus";
 import { CatalogClient } from "./CatalogClient";
 
 async function getDepartmentsAndLevels(): Promise<{
@@ -57,6 +58,9 @@ export default async function CatalogPage() {
             </a>
             .
           </p>
+          <div className="mt-3">
+            <CatalogSyncStatus />
+          </div>
         </div>
 
         <CatalogClient departments={departments} levels={levels} />
